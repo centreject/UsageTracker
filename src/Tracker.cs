@@ -10,10 +10,11 @@ namespace UsageTracker
     ///   실행(R): 잠금·절전·일시정지가 아닐 때 (자리 비움 중에도 계속)
     ///   PC 사용(U): 잠금·절전·자리 비움이 아닐 때 (일시정지와 무관)
     ///   PC 켜짐(P): 절전이 아닐 때
+    /// 바깥 세계는 IEnv로만 본다 (자체 시험에서 가짜로 바꿔 끼움).
     /// </summary>
     sealed class Tracker
     {
-        readonly AppResolver apps;
+        readonly IEnv env;
         readonly SessionWriter writer;
 
         Segment active, used, on;
@@ -29,9 +30,9 @@ namespace UsageTracker
         public int IdleThresholdMs = 5 * 60 * 1000;
         public int TickIntervalMs = 60 * 1000;
 
-        public Tracker(AppResolver apps, SessionWriter writer)
+        public Tracker(IEnv env, SessionWriter writer)
         {
-            this.apps = apps;
+            this.env = env;
             this.writer = writer;
         }
 
@@ -48,7 +49,7 @@ namespace UsageTracker
             if (idle) return "자리 비움";
             // 트레이를 누르면 맨 앞 창이 작업 표시줄로 바뀌므로, 마지막으로 기록한 앱을 보여 준다
             string id = active != null ? active.AppId : lastActiveApp;
-            return id != null ? "기록 중: " + apps.NameOf(id) : "기록 중";
+            return id != null ? "기록 중: " + env.NameOf(id) : "기록 중";
         }
 
         bool ActiveAllowed { get { return !locked && !suspended && !paused && !idle; } }
@@ -60,16 +61,16 @@ namespace UsageTracker
 
         public void Start()
         {
-            int recovered = writer.Recover(DateTime.Now);
+            int recovered = writer.Recover(env.Now());
             if (recovered > 0) ErrorLog.Write("recover", new Exception("비정상 종료로 열린 구간 " + recovered + "개를 마지막 저장 시점에서 닫음"));
-            lastTickTs = Clock.Ts();
-            OnForeground(Native.GetForegroundWindow());
+            lastTickTs = env.Ts();
+            OnForeground(env.Foreground());
             RefreshRunning();
         }
 
         public void Shutdown()
         {
-            CloseAll(Clock.Ts());
+            CloseAll(env.Ts());
             Flush();
         }
 
@@ -78,7 +79,7 @@ namespace UsageTracker
         public void OnForeground(IntPtr hwnd)
         {
             fgHwnd = hwnd;
-            fgApp = apps.ForegroundApp(hwnd);
+            fgApp = env.AppOf(hwnd);
             Reconcile();
         }
 
@@ -100,12 +101,12 @@ namespace UsageTracker
             if (value)
             {
                 Reconcile();
-                CloseRunning(Clock.Ts());
+                CloseRunning(env.Ts());
                 Flush();
             }
             else
             {
-                lastTickTs = Clock.Ts();
+                lastTickTs = env.Ts();
                 RefreshForeground();
                 Reconcile();
                 RefreshRunning();
@@ -116,7 +117,7 @@ namespace UsageTracker
         public void SetPause(int minutes)
         {
             paused = minutes != 0;
-            pauseUntil = minutes > 0 ? DateTime.Now.AddMinutes(minutes) : DateTime.MaxValue;
+            pauseUntil = minutes > 0 ? env.Now().AddMinutes(minutes) : DateTime.MaxValue;
             if (!paused) RefreshForeground();
             Reconcile();
             if (!paused) RefreshRunning();
@@ -125,24 +126,24 @@ namespace UsageTracker
         /// <summary>시스템 시각이 바뀌면 열린 구간을 모두 닫고 새 시각으로 다시 연다.</summary>
         public void OnTimeChanged()
         {
-            CloseAll(Clock.Ts());
-            lastTickTs = Clock.Ts();
+            CloseAll(env.Ts());
+            lastTickTs = env.Ts();
             Reconcile();
             RefreshRunning();
         }
 
         void RefreshForeground()
         {
-            fgHwnd = Native.GetForegroundWindow();
-            fgApp = apps.ForegroundApp(fgHwnd);
+            fgHwnd = env.Foreground();
+            fgApp = env.AppOf(fgHwnd);
         }
 
         // ---------- 주기 작업 (기본 1분) ----------
 
         public void Tick()
         {
-            long ts = Clock.Ts();
-            DateTime now = DateTime.Now;
+            long ts = env.Ts();
+            DateTime now = env.Now();
 
             // 타이머가 오래 멈췄다면(절전 알림 누락 등) 그 사이는 기록하지 않는다
             long gapMs = (ts - lastTickTs) * 1000 / Stopwatch.Frequency;
@@ -151,6 +152,7 @@ namespace UsageTracker
                 long cut = lastTickTs + Clock.MsToTs(TickIntervalMs);
                 CloseAll(cut);
                 RefreshForeground();
+                Reconcile();
             }
             lastTickTs = ts;
 
@@ -158,63 +160,29 @@ namespace UsageTracker
 
             if (suspended) return;
 
-            var pathCache = new Dictionary<uint, string>();
-            var audioApps = AudioApps(pathCache);
+            var audioApps = env.AudioApps();
 
             // 자리 비움 판정: 입력이 없어도 맨 앞 앱이 소리를 내거나 전체 화면이면 사용 중으로 본다
             if (!idle && !locked)
             {
-                uint idleMs = Native.IdleMilliseconds();
-                bool exception = fgApp != null && (audioApps.Contains(fgApp) || IsFullscreen(fgHwnd));
+                uint idleMs = env.IdleMs();
+                bool exception = fgApp != null && (audioApps.Contains(fgApp) || env.IsFullscreen(fgHwnd));
                 if (idleMs >= IdleThresholdMs && !exception) EnterIdle(ts, idleMs);
             }
 
-            SampleRunning(audioApps, pathCache, ts, now);
-        }
-
-        /// <summary>잠금 해제·절전 복귀·일시정지 해제·시각 변경 직후 실행 시간을 바로 다시 연다 (다음 주기까지 기다리지 않음).</summary>
-        void RefreshRunning()
-        {
-            if (!RunningAllowed) return;
-            var pathCache = new Dictionary<uint, string>();
-            SampleRunning(AudioApps(pathCache), pathCache, Clock.Ts(), DateTime.Now);
-        }
-
-        HashSet<string> AudioApps(Dictionary<uint, string> pathCache)
-        {
-            var audioApps = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-            foreach (uint pid in Audio.ActivePids())
-            {
-                string id = apps.RunningApp(pid, IntPtr.Zero, pathCache);
-                if (id != null) audioApps.Add(id);
-            }
-            return audioApps;
-        }
-
-        /// <summary>실행 시간: 보이는 창이 있거나 소리를 내는 앱 + 지금 활성 앱.</summary>
-        void SampleRunning(HashSet<string> audioApps, Dictionary<uint, string> pathCache, long ts, DateTime now)
-        {
-            if (!RunningAllowed) return;
-            var set = VisibleApps(pathCache);
-            set.UnionWith(audioApps);
-            if (active != null && AppResolver.CountsAsRunning(active.AppId)) set.Add(active.AppId);
-
-            var toClose = new List<string>();
-            foreach (var kv in running) if (!set.Contains(kv.Key)) toClose.Add(kv.Key);
-            foreach (var id in toClose) { Close(running[id], ts); running.Remove(id); }
-            foreach (var id in set) EnsureRunning(id, ts, now);
+            SampleRunning(audioApps, ts, now);
         }
 
         /// <summary>자리 비움 중 짧은 간격으로 호출. 입력이 돌아오면 true.</summary>
         public bool IdlePoll()
         {
             if (!idle) return true;
-            uint idleMs = Native.IdleMilliseconds();
+            uint idleMs = env.IdleMs();
             if (idleMs > 5000) return false;
             idle = false;
             RefreshForeground();
-            long ts = Clock.Ts() - Clock.MsToTs(idleMs);
-            ReconcileAt(ts, DateTime.Now.AddMilliseconds(-idleMs));
+            long ts = env.Ts() - Clock.MsToTs(idleMs);
+            ReconcileAt(ts, env.Now().AddMilliseconds(-idleMs));
             return true;
         }
 
@@ -224,6 +192,28 @@ namespace UsageTracker
             long at = ts - Clock.MsToTs(idleMs);   // 마지막 입력 시점까지만 집계
             if (active != null) { Close(active, Math.Max(at, active.StartTs)); active = null; }
             if (used != null) { Close(used, Math.Max(at, used.StartTs)); used = null; }
+        }
+
+        /// <summary>잠금 해제·절전 복귀·일시정지 해제·시각 변경 직후 실행 시간을 바로 다시 연다 (다음 주기까지 기다리지 않음).</summary>
+        void RefreshRunning()
+        {
+            if (!RunningAllowed) return;
+            SampleRunning(env.AudioApps(), env.Ts(), env.Now());
+        }
+
+        /// <summary>실행 시간: 보이는 창이 있거나 소리를 내는 앱 + 지금 활성 앱.</summary>
+        void SampleRunning(HashSet<string> audioApps, long ts, DateTime now)
+        {
+            if (!RunningAllowed) return;
+            var set = env.VisibleApps();
+            set.UnionWith(audioApps);
+            set.RemoveWhere(id => !AppResolver.CountsAsRunning(id));
+            if (active != null && AppResolver.CountsAsRunning(active.AppId)) set.Add(active.AppId);
+
+            var toClose = new List<string>();
+            foreach (var kv in running) if (!set.Contains(kv.Key)) toClose.Add(kv.Key);
+            foreach (var id in toClose) { Close(running[id], ts); running.Remove(id); }
+            foreach (var id in set) EnsureRunning(id, ts, now);
         }
 
         void SplitAtMidnight(DateTime now)
@@ -247,7 +237,7 @@ namespace UsageTracker
 
         void Reconcile()
         {
-            ReconcileAt(Clock.Ts(), DateTime.Now);
+            ReconcileAt(env.Ts(), env.Now());
         }
 
         void ReconcileAt(long ts, DateTime now)
@@ -263,7 +253,7 @@ namespace UsageTracker
             }
             if (active == null && want != null)
             {
-                active = Open('A', want, ts, now);
+                active = new Segment { Kind = 'A', AppId = want, Start = now, StartTs = ts };
                 lastActiveApp = want;
                 if (RunningAllowed && AppResolver.CountsAsRunning(want)) EnsureRunning(want, ts, now);
             }
@@ -273,13 +263,13 @@ namespace UsageTracker
 
         void Toggle(ref Segment s, bool allowed, char kind, long ts, DateTime now)
         {
-            if (allowed && s == null) s = Open(kind, "-", ts, now);
+            if (allowed && s == null) s = new Segment { Kind = kind, AppId = "-", Start = now, StartTs = ts };
             else if (!allowed && s != null) { Close(s, ts); s = null; }
         }
 
         void EnsureRunning(string id, long ts, DateTime now)
         {
-            if (!running.ContainsKey(id)) running[id] = Open('R', id, ts, now);
+            if (!running.ContainsKey(id)) running[id] = new Segment { Kind = 'R', AppId = id, Start = now, StartTs = ts };
         }
 
         void CloseRunning(long ts)
@@ -296,12 +286,6 @@ namespace UsageTracker
             CloseRunning(ts);
         }
 
-        Segment Open(char kind, string appId, long ts, DateTime now)
-        {
-            // now는 ts와 같은 순간이어야 한다. 되돌린 ts로 열 때는 호출 측이 맞춰서 넘긴다.
-            return new Segment { Kind = kind, AppId = appId, Start = now, StartTs = ts };
-        }
-
         void Close(Segment s, long endTs)
         {
             writer.AddClosed(s, Clock.EndOf(s, endTs));
@@ -316,49 +300,8 @@ namespace UsageTracker
             if (used != null) open.Add(used);
             if (active != null) open.Add(active);
             open.AddRange(running.Values);
-            writer.Flush(DateTime.Now, open);
-            writer.AppendAppInfo(apps.NewApps);
-        }
-
-        // ---------- 창 조사 ----------
-
-        HashSet<string> VisibleApps(Dictionary<uint, string> pathCache)
-        {
-            var set = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-            Native.EnumWindows((h, l) =>
-            {
-                if (!Native.IsWindowVisible(h) || Native.GetWindow(h, Native.GW_OWNER) != IntPtr.Zero) return true;
-                if ((Native.GetWindowLong(h, Native.GWL_EXSTYLE) & Native.WS_EX_TOOLWINDOW) != 0) return true;
-                if (Native.GetWindowTextLength(h) == 0) return true;
-                int cloaked;
-                if (Native.DwmGetWindowAttribute(h, Native.DWMWA_CLOAKED, out cloaked, 4) == 0 && (cloaked & Native.DWM_CLOAKED_APP) != 0) return true;
-
-                uint pid = Native.WindowPid(h);
-                if (Native.ClassName(h) == "ApplicationFrameWindow")
-                {
-                    uint inner = AppResolver.InnerUwpPid(h, pid);
-                    if (inner == 0) return true;
-                    pid = inner;
-                }
-                string id = apps.RunningApp(pid, h, pathCache);
-                if (id != null) set.Add(id);
-                return true;
-            }, IntPtr.Zero);
-            return set;
-        }
-
-        static bool IsFullscreen(IntPtr hwnd)
-        {
-            if (hwnd == IntPtr.Zero || hwnd == Native.GetShellWindow() || hwnd == Native.GetDesktopWindow()) return false;
-            string cls = Native.ClassName(hwnd);
-            if (cls == "Progman" || cls == "WorkerW") return false;
-            Native.RECT r;
-            if (!Native.GetWindowRect(hwnd, out r)) return false;
-            IntPtr mon = Native.MonitorFromWindow(hwnd, 2 /*MONITOR_DEFAULTTONEAREST*/);
-            var mi = new Native.MONITORINFO { cbSize = System.Runtime.InteropServices.Marshal.SizeOf(typeof(Native.MONITORINFO)) };
-            if (!Native.GetMonitorInfo(mon, ref mi)) return false;
-            return r.Left <= mi.rcMonitor.Left && r.Top <= mi.rcMonitor.Top &&
-                   r.Right >= mi.rcMonitor.Right && r.Bottom >= mi.rcMonitor.Bottom;
+            writer.Flush(env.Now(), open);
+            writer.AppendAppInfo(env.NewApps);
         }
     }
 }

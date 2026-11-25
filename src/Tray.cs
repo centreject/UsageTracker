@@ -14,6 +14,7 @@ namespace UsageTracker
         public const int CmdPause15 = 20, CmdPause60 = 21, CmdPauseForever = 22, CmdResume = 23;
         public const int CmdAutoStart = 30;
         public const int CmdErrors = 40;
+        public const int CmdFlush = 50;   // 화면 모드가 열 때 보내는 저장 요청 (메뉴에는 없음)
         public const int CmdExit = 99;
 
         readonly IntPtr hwnd;

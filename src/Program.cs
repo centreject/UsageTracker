@@ -39,6 +39,17 @@ namespace UsageTracker
             foreach (var a in args)
             {
                 if (a == "--ui") return ShowNotReady();
+                if (a.StartsWith("--bench="))
+                {
+                    SelfTest.Bench(a.Substring(8));
+                    return 0;
+                }
+                if (a.StartsWith("--selftest"))
+                {
+                    string report = a.StartsWith("--selftest=") ? a.Substring(11)
+                        : Path.Combine(Path.GetTempPath(), "UsageTracker-selftest.txt");
+                    return SelfTest.Run(report);
+                }
                 if (a.StartsWith("--data=")) { dataDir = Path.GetFullPath(a.Substring(7)); manageAutoStart = false; }
                 else if (a.StartsWith("--tick=")) tickMs = (uint)Math.Max(1, int.Parse(a.Substring(7))) * 1000;
                 else if (a.StartsWith("--flush=")) flushMs = (uint)Math.Max(1, int.Parse(a.Substring(8))) * 1000;
@@ -60,7 +71,7 @@ namespace UsageTracker
 
                 var writer = new SessionWriter(dataDir);
                 var resolver = new AppResolver(writer.LoadAppInfo());
-                tracker = new Tracker(resolver, writer);
+                tracker = new Tracker(new RealEnv(resolver), writer);
                 tracker.IdleThresholdMs = idleSecOverride == 0 ? int.MaxValue
                     : (idleSecOverride > 0 ? idleSecOverride : settings.IdleMinutes * 60) * 1000;
                 tracker.TickIntervalMs = (int)tickMs;
@@ -264,6 +275,9 @@ namespace UsageTracker
                 case Tray.CmdErrors:
                     if (ErrorLog.FilePath != null && File.Exists(ErrorLog.FilePath))
                         Native.ShellExecute(IntPtr.Zero, "open", "notepad.exe", "\"" + ErrorLog.FilePath + "\"", null, 1);
+                    break;
+                case Tray.CmdFlush:
+                    tracker.Flush();
                     break;
                 case Tray.CmdExit:
                     Native.PostQuitMessage(0);

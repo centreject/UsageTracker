@@ -4,7 +4,14 @@ Windows 데스크탑용 프로그램 사용 시간 기록 앱. 백그라운드�
 
 ## 상태
 
-개발 중 — 2단계(기록 모드) 완료. 화면 모드는 아직 없다. 변경 내용은 [CHANGELOG.md](CHANGELOG.md) 참고.
+개발 중 — 3단계(저장소 읽기·집계, 자체 시험) 완료. 화면 모드는 아직 없다. 변경 내용은 [CHANGELOG.md](CHANGELOG.md), 사람이 확인할 항목은 [docs/manual-tests.md](docs/manual-tests.md) 참고.
+
+## 시험
+
+```powershell
+.\tools\selftest.ps1      # 집계 로직 자체 시험 (가짜 시계·창·입력)
+.\tools\test-events.ps1   # 실제 실행 + 일시정지·절전·잠금·시각 변경 메시지
+```
 
 ## 주요 기능 (계획)
 
