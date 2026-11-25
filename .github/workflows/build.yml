@@ -10,7 +10,7 @@ jobs:
   build:
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Build (.NET Framework 4.8 csc)
         shell: powershell
@@ -28,7 +28,7 @@ jobs:
           $v = (Get-Content VERSION -Raw).Trim()
           Compress-Archive -Path bin\UsageTracker.exe, bin\UsageTracker.exe.config, README.md -DestinationPath "UsageTracker-v$v.zip"
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: UsageTracker
           path: UsageTracker-v*.zip
