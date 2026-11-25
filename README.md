@@ -4,7 +4,7 @@ Windows 데스크탑용 프로그램 사용 시간 기록 앱. 백그라운드�
 
 ## 상태
 
-개발 중 — 1단계(실측 프로토타입) 완료. 변경 내용은 [CHANGELOG.md](CHANGELOG.md) 참고.
+개발 중 — 2단계(기록 모드) 완료. 화면 모드는 아직 없다. 변경 내용은 [CHANGELOG.md](CHANGELOG.md) 참고.
 
 ## 주요 기능 (계획)
 
@@ -18,10 +18,25 @@ Windows 데스크탑용 프로그램 사용 시간 기록 앱. 백그라운드�
 Windows에 내장된 .NET Framework 4.8 C# 컴파일러만 있으면 된다.
 
 ```powershell
-cd prototype
-C:\Windows\Microsoft.NET\Framework64\v4.0.30319\csc.exe /nologo /target:winexe /optimize+ /codepage:65001 /platform:x64 /out:bin\Spike.exe Spike.cs
-Copy-Item Spike.exe.config bin\
+.\build.ps1
 ```
+
+결과물은 `bin\UsageTracker.exe`와 `bin\UsageTracker.exe.config`다. 실행하면 트레이에 상주하며 `%LOCALAPPDATA%\UsageTracker\`에 기록한다.
+
+시험할 때는 실제 데이터와 자동 시작을 건드리지 않도록 데이터 폴더를 따로 지정한다.
+
+```powershell
+.\tools\test-run.ps1 -Seconds 60 -Extra '--tick=5 --flush=10 --idle=0'
+```
+
+| 옵션 | 뜻 |
+| --- | --- |
+| `--data=폴더` | 데이터 폴더 지정. 지정하면 자동 시작을 등록하지 않는다 |
+| `--tick=초` | 주기 작업 간격 (기본 60) |
+| `--flush=초` | 저장 간격 (기본 300) |
+| `--idle=초` | 자리 비움 기준 (기본: 설정값 5분, 0 = 끔) |
+
+`prototype/`은 1단계 실측용 코드로, 기록용으로 남겨 두었다.
 
 ## 버전 관리
 

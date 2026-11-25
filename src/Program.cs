@@ -1,0 +1,258 @@
+using System;
+using System.IO;
+using System.Reflection;
+using System.Runtime.InteropServices;
+using System.Threading;
+
+namespace UsageTracker
+{
+    /// <summary>
+    /// 진입점. 기본은 기록 모드(트레이 상주). 옵션:
+    ///   --ui              화면 모드 (4단계에서 구현)
+    ///   --data=폴더       데이터 폴더 지정 (개발·시험용. 지정하면 자동 시작을 건드리지 않는다)
+    ///   --tick=초 --flush=초 --idle=초   주기·자리 비움 기준을 바꾼다 (시험용)
+    /// </summary>
+    static class Program
+    {
+        static readonly IntPtr TimerTickId = (IntPtr)1, TimerIdleId = (IntPtr)2, TimerFlushId = (IntPtr)3, TimerPauseId = (IntPtr)4;
+        const uint IdlePollMs = 2000;
+
+        static IntPtr hwnd;
+        static Native.WndProc wndProc;           // GC 방지
+        static Native.WinEventProc winEvent;     // GC 방지
+        static IntPtr hook;
+        static uint taskbarCreated;
+        static Tracker tracker;
+        static Tray tray;
+        static Settings settings;
+        static bool manageAutoStart;
+        static string exePath;
+        static uint tickMs = 60000, flushMs = 300000;
+        static bool idleTimerOn;
+
+        [STAThread]
+        static int Main(string[] args)
+        {
+            string dataDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "UsageTracker");
+            manageAutoStart = true;
+            int idleSecOverride = -1;
+            foreach (var a in args)
+            {
+                if (a == "--ui") return ShowNotReady();
+                if (a.StartsWith("--data=")) { dataDir = Path.GetFullPath(a.Substring(7)); manageAutoStart = false; }
+                else if (a.StartsWith("--tick=")) tickMs = (uint)Math.Max(1, int.Parse(a.Substring(7))) * 1000;
+                else if (a.StartsWith("--flush=")) flushMs = (uint)Math.Max(1, int.Parse(a.Substring(8))) * 1000;
+                else if (a.StartsWith("--idle=")) idleSecOverride = Math.Max(0, int.Parse(a.Substring(7)));   // 0 = 자리 비움 판정 끔 (시험용)
+            }
+
+            bool created;
+            using (var mutex = new Mutex(true, "Local\\UsageTracker.Recorder", out created))
+            {
+                if (!created) return 1;   // 이미 실행 중
+                Directory.CreateDirectory(dataDir);
+                ErrorLog.Init(dataDir);
+                AppDomain.CurrentDomain.UnhandledException += (s, e) => ErrorLog.Write("unhandled", e.ExceptionObject as Exception ?? new Exception("unknown"));
+
+                exePath = Assembly.GetExecutingAssembly().Location;
+                settings = new Settings(dataDir);
+                if (settings.IsNew) settings.Save();
+                if (manageAutoStart) AutoStart.Apply(settings.AutoStart, exePath);
+
+                var writer = new SessionWriter(dataDir);
+                var resolver = new AppResolver(writer.LoadAppInfo());
+                tracker = new Tracker(resolver, writer);
+                tracker.IdleThresholdMs = idleSecOverride == 0 ? int.MaxValue
+                    : (idleSecOverride > 0 ? idleSecOverride : settings.IdleMinutes * 60) * 1000;
+                tracker.TickIntervalMs = (int)tickMs;
+
+                CreateWindow();
+                taskbarCreated = Native.RegisterWindowMessage("TaskbarCreated");
+                tray = new Tray(hwnd);
+                tray.Add("사용 시간 기록");
+                Native.WTSRegisterSessionNotification(hwnd, 0 /*NOTIFY_FOR_THIS_SESSION*/);
+
+                winEvent = OnWinEvent;
+                hook = Native.SetWinEventHook(Native.EVENT_SYSTEM_FOREGROUND, Native.EVENT_SYSTEM_FOREGROUND, IntPtr.Zero,
+                    winEvent, 0, 0, Native.WINEVENT_OUTOFCONTEXT | Native.WINEVENT_SKIPOWNPROCESS);
+
+                Safe("start", tracker.Start);
+                Native.SetTimer(hwnd, TimerTickId, tickMs, IntPtr.Zero);
+                Native.SetTimer(hwnd, TimerFlushId, flushMs, IntPtr.Zero);
+                Native.TrimMemory();
+
+                Native.MSG msg;
+                while (Native.GetMessage(out msg, IntPtr.Zero, 0, 0) > 0)
+                {
+                    Native.TranslateMessage(ref msg);
+                    Native.DispatchMessage(ref msg);
+                }
+
+                Safe("shutdown", tracker.Shutdown);
+                Native.UnhookWinEvent(hook);
+                Native.WTSUnRegisterSessionNotification(hwnd);
+                tray.Remove();
+            }
+            return 0;
+        }
+
+        static int ShowNotReady()
+        {
+            MessageBox(IntPtr.Zero, "화면 모드는 아직 준비 중입니다 (4단계).", "사용 시간 기록", 0x40);
+            return 0;
+        }
+
+        [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+        static extern int MessageBox(IntPtr hwnd, string text, string caption, uint type);
+
+        static void CreateWindow()
+        {
+            wndProc = WindowProc;
+            var wc = new Native.WNDCLASSEX
+            {
+                cbSize = (uint)Marshal.SizeOf(typeof(Native.WNDCLASSEX)),
+                lpfnWndProc = Marshal.GetFunctionPointerForDelegate(wndProc),
+                hInstance = Native.GetModuleHandle(null),
+                lpszClassName = "UsageTracker.Recorder"
+            };
+            Native.RegisterClassEx(ref wc);
+            // 보이지 않는 일반 창 (TaskbarCreated 방송을 받으려면 메시지 전용 창이면 안 된다)
+            hwnd = Native.CreateWindowEx(0, wc.lpszClassName, "UsageTracker.Recorder", 0, 0, 0, 0, 0,
+                IntPtr.Zero, IntPtr.Zero, wc.hInstance, IntPtr.Zero);
+        }
+
+        static void OnWinEvent(IntPtr h, uint evt, IntPtr window, int idObject, int idChild, uint thread, uint time)
+        {
+            Safe("foreground", () => tracker.OnForeground(window));
+        }
+
+        static IntPtr WindowProc(IntPtr h, uint msg, IntPtr wParam, IntPtr lParam)
+        {
+            try
+            {
+                switch (msg)
+                {
+                    case Native.WM_TIMER:
+                        OnTimer(wParam);
+                        return IntPtr.Zero;
+
+                    case Tray.CallbackMessage:
+                        int ev = lParam.ToInt32() & 0xFFFF;
+                        if (ev == 0x0200 /*WM_MOUSEMOVE*/) tray.Update("사용 시간 기록\n" + tracker.StatusText());
+                        else if (ev == Native.WM_RBUTTONUP) OnMenu();
+                        else if (ev == Native.WM_LBUTTONDBLCLK) ShowNotReady();
+                        return IntPtr.Zero;
+
+                    case Native.WM_WTSSESSION_CHANGE:
+                        int code = wParam.ToInt32();
+                        if (code == Native.WTS_SESSION_LOCK || code == Native.WTS_CONSOLE_DISCONNECT || code == Native.WTS_REMOTE_DISCONNECT)
+                            tracker.SetLocked(true);
+                        else if (code == Native.WTS_SESSION_UNLOCK || code == Native.WTS_CONSOLE_CONNECT || code == Native.WTS_REMOTE_CONNECT)
+                            tracker.SetLocked(false);
+                        UpdateIdleTimer();
+                        return IntPtr.Zero;
+
+                    case Native.WM_POWERBROADCAST:
+                        int pbt = wParam.ToInt32();
+                        if (pbt == Native.PBT_APMSUSPEND) tracker.SetSuspended(true);
+                        else if (pbt == Native.PBT_APMRESUMEAUTOMATIC || pbt == Native.PBT_APMRESUMESUSPEND) tracker.SetSuspended(false);
+                        UpdateIdleTimer();
+                        return (IntPtr)1;
+
+                    case Native.WM_TIMECHANGE:
+                        tracker.OnTimeChanged();
+                        return IntPtr.Zero;
+
+                    case Native.WM_QUERYENDSESSION:
+                        return (IntPtr)1;
+
+                    case 0x0010: // WM_CLOSE: 외부에서 정상 종료를 요청할 때 (설치·업데이트 스크립트, 시험)
+                        Native.PostQuitMessage(0);
+                        return IntPtr.Zero;
+
+                    case Native.WM_ENDSESSION:
+                        if (wParam != IntPtr.Zero) { tracker.Shutdown(); tray.Remove(); }
+                        return IntPtr.Zero;
+                }
+                if (msg == taskbarCreated && taskbarCreated != 0)
+                {
+                    tray.Add("사용 시간 기록");   // 탐색기가 재시작되면 아이콘을 다시 등록
+                    return IntPtr.Zero;
+                }
+            }
+            catch (Exception ex) { ErrorLog.Write("wndproc", ex); }
+            return Native.DefWindowProc(h, msg, wParam, lParam);
+        }
+
+        static void OnTimer(IntPtr id)
+        {
+            if (id == TimerTickId)
+            {
+                tracker.Tick();
+                UpdateIdleTimer();
+                Native.TrimMemory();
+            }
+            else if (id == TimerIdleId)
+            {
+                if (tracker.IdlePoll()) UpdateIdleTimer();
+            }
+            else if (id == TimerFlushId)
+            {
+                tracker.Flush();
+                Native.TrimMemory();
+            }
+            else if (id == TimerPauseId)
+            {
+                Native.KillTimer(hwnd, TimerPauseId);
+                if (tracker.IsPaused && tracker.PauseUntil != DateTime.MaxValue) tracker.SetPause(0);
+            }
+        }
+
+        static void UpdateIdleTimer()
+        {
+            bool want = tracker.IsIdle;
+            if (want == idleTimerOn) return;
+            if (want) Native.SetTimer(hwnd, TimerIdleId, IdlePollMs, IntPtr.Zero);
+            else Native.KillTimer(hwnd, TimerIdleId);
+            idleTimerOn = want;
+        }
+
+        static void OnMenu()
+        {
+            int cmd = tray.ShowMenu(tracker.StatusText(), tracker.IsPaused, settings.AutoStart, manageAutoStart, ErrorLog.Count);
+            switch (cmd)
+            {
+                case Tray.CmdPause15: Pause(15); break;
+                case Tray.CmdPause60: Pause(60); break;
+                case Tray.CmdPauseForever: Pause(-1); break;
+                case Tray.CmdResume:
+                    Native.KillTimer(hwnd, TimerPauseId);
+                    tracker.SetPause(0);
+                    break;
+                case Tray.CmdAutoStart:
+                    settings.AutoStart = !settings.AutoStart;
+                    settings.Save();
+                    AutoStart.Apply(settings.AutoStart, exePath);
+                    break;
+                case Tray.CmdErrors:
+                    if (ErrorLog.FilePath != null && File.Exists(ErrorLog.FilePath))
+                        Native.ShellExecute(IntPtr.Zero, "open", "notepad.exe", "\"" + ErrorLog.FilePath + "\"", null, 1);
+                    break;
+                case Tray.CmdExit:
+                    Native.PostQuitMessage(0);
+                    break;
+            }
+        }
+
+        static void Pause(int minutes)
+        {
+            tracker.SetPause(minutes);
+            if (minutes > 0) Native.SetTimer(hwnd, TimerPauseId, (uint)minutes * 60000, IntPtr.Zero);
+        }
+
+        static void Safe(string context, Action a)
+        {
+            try { a(); }
+            catch (Exception ex) { ErrorLog.Write(context, ex); }
+        }
+    }
+}
