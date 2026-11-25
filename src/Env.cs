@@ -37,16 +37,19 @@ namespace UsageTracker
         public List<AppInfo> NewApps { get { return apps.NewApps; } }
         public void ResetApps() { apps.Reset(); }
 
+        // 최근 2분 30초 안에 소리가 들린 앱은 소리를 내는 중으로 본다 (1분 주기 두 번 + 여유)
+        readonly AudioMemory audioMemory = new AudioMemory(Clock.MsToTs(150 * 1000));
+
         public HashSet<string> AudioApps()
         {
             pathCache = new Dictionary<uint, string>();   // 주기 작업마다 새로 (pid 재사용 대비)
-            var set = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var heard = new List<string>();
             foreach (uint pid in Audio.ActivePids())
             {
                 string id = apps.RunningApp(pid, IntPtr.Zero, pathCache);
-                if (id != null) set.Add(id);
+                if (id != null) heard.Add(id);
             }
-            return set;
+            return audioMemory.Update(heard, Ts());
         }
 
         public HashSet<string> VisibleApps()

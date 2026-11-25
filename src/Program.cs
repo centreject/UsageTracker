@@ -41,6 +41,19 @@ namespace UsageTracker
             foreach (var a in args)
             {
                 if (a == "--ui") ui = true;
+                else if (a.StartsWith("--probe="))
+                {
+                    // 진단: 소리 세션 상태와 지금 소리를 내는 pid, 실행 중 프로세스의 앱 ID(실행기 구분 포함)
+                    var lines = new System.Collections.Generic.List<string>(Audio.Describe());
+                    lines.Add("audible pids: " + string.Join(",", Audio.ActivePids()));
+                    var resolver = new AppResolver(new System.Collections.Generic.Dictionary<string, AppInfo>(StringComparer.OrdinalIgnoreCase));
+                    var cache = new System.Collections.Generic.Dictionary<uint, string>();
+                    var env = new RealEnv(resolver);
+                    foreach (var id in env.VisibleApps()) lines.Add("visible app: " + id + " = " + resolver.NameOf(id));
+                    lines.Add("foreground app: " + resolver.ForegroundApp(Native.GetForegroundWindow()));
+                    File.WriteAllLines(a.Substring(8), lines.ToArray(), new System.Text.UTF8Encoding(true));
+                    return 0;
+                }
                 else if (a.StartsWith("--bench="))
                 {
                     SelfTest.Bench(a.Substring(8));
@@ -78,7 +91,11 @@ namespace UsageTracker
                 exePath = Assembly.GetExecutingAssembly().Location;
                 settings = new Settings(dataDir);
                 if (settings.IsNew) settings.Save();
-                if (manageAutoStart) AutoStart.Apply(settings.AutoStart, exePath);
+                if (manageAutoStart)
+                {
+                    AutoStart.Apply(settings.AutoStart, exePath);
+                    StartMenu.Ensure(exePath);   // 시작 메뉴에서 통계 창을 열 수 있게
+                }
 
                 var writer = new SessionWriter(dataDir);
                 var resolver = new AppResolver(writer.LoadAppInfo());
@@ -314,7 +331,11 @@ namespace UsageTracker
                 case Tray.CmdReloadSettings:
                     settings = new Settings(dataDir);
                     if (idleSecOverride < 0) tracker.IdleThresholdMs = settings.IdleMinutes * 60 * 1000;
-                    if (manageAutoStart) AutoStart.Apply(settings.AutoStart, exePath);
+                    if (manageAutoStart)
+                {
+                    AutoStart.Apply(settings.AutoStart, exePath);
+                    StartMenu.Ensure(exePath);   // 시작 메뉴에서 통계 창을 열 수 있게
+                }
                     break;
                 case Tray.CmdExit:
                     Native.PostQuitMessage(0);

@@ -22,6 +22,9 @@ namespace UsageTracker
         public readonly Dictionary<string, double> Running = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase);
         public readonly Dictionary<string, double[]> HourlyActive = new Dictionary<string, double[]>(StringComparer.OrdinalIgnoreCase);
         public readonly double[] HourlyAll = new double[24];
+        // 날짜별 활성 시간 (주·월·년 추이 그래프)
+        public readonly Dictionary<string, Dictionary<DateTime, double>> DailyActive = new Dictionary<string, Dictionary<DateTime, double>>(StringComparer.OrdinalIgnoreCase);
+        public readonly Dictionary<DateTime, double> DailyAll = new Dictionary<DateTime, double>();
         public double PcOn, PcUsed;
         public readonly List<RawSeg> ActiveSegments = new List<RawSeg>();   // 타임라인용 (키로 바꾼 AppId)
     }
@@ -126,6 +129,10 @@ namespace UsageTracker
                         double[] h;
                         if (!sum.HourlyActive.TryGetValue(key, out h)) { h = new double[24]; sum.HourlyActive[key] = h; }
                         AddHourly(h, sum.HourlyAll, s.Start, s.End);
+                        Dictionary<DateTime, double> dd;
+                        if (!sum.DailyActive.TryGetValue(key, out dd)) { dd = new Dictionary<DateTime, double>(); sum.DailyActive[key] = dd; }
+                        double dv; dd.TryGetValue(s.Start.Date, out dv); dd[s.Start.Date] = dv + s.Seconds;   // 구간은 자정에서 이미 나뉘어 있다
+                        sum.DailyAll.TryGetValue(s.Start.Date, out dv); sum.DailyAll[s.Start.Date] = dv + s.Seconds;
                         sum.ActiveSegments.Add(new RawSeg { Kind = 'A', AppId = key, Start = s.Start, End = s.End });
                         break;
                     }

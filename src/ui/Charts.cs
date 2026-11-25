@@ -145,7 +145,9 @@ namespace UsageTracker.Ui
         }
     }
 
-    /// <summary>시간대별(0–23시) 활성 시간 막대그래프. 한 계열(전체 또는 선택한 앱)만 그린다.</summary>
+    /// <summary>
+    /// 막대그래프 한 계열(전체 또는 선택한 앱). 기본은 시간대별(0–23시), SetBars로 날짜별·월별 추이에도 쓴다.
+    /// </summary>
     sealed class HourlyChart : Control
     {
         double[] values = new double[24];
@@ -155,18 +157,31 @@ namespace UsageTracker.Ui
         public Color BarColor = Color.Empty;
         public string Caption = "";
 
-        const int PadL = 52, PadR = 12, PadT = 26, PadB = 20;
+        const int PadR = 12, PadT = 26, PadB = 20;
+        int PadL = 52;   // 세로축 글자 폭에 맞춰 그릴 때마다 다시 정한다
 
         public HourlyChart()
         {
             SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.UserPaint | ControlStyles.ResizeRedraw, true);
         }
 
+        string[] axisLabels, tipLabels;
+
+        /// <summary>시간대별(0–23시).</summary>
         public void SetData(double[] hourly, string caption, Color color)
         {
-            values = hourly ?? new double[24];
+            var axis = new string[24]; var tips = new string[24];
+            for (int h = 0; h < 24; h++) { axis[h] = h % 3 == 0 ? h + "시" : null; tips[h] = h + "시–" + (h + 1) + "시"; }
+            SetBars(hourly ?? new double[24], axis, tips, caption, color);
+        }
+
+        /// <summary>임의 막대: 값, 아래 축 이름(null이면 생략), 툴팁 제목.</summary>
+        public void SetBars(double[] vals, string[] axis, string[] tips, string caption, Color color)
+        {
+            values = vals; axisLabels = axis; tipLabels = tips;
             Caption = caption;
             BarColor = color;
+            lastHour = -1;
             Invalidate();
         }
 
@@ -193,11 +208,14 @@ namespace UsageTracker.Ui
         {
             var g = e.Graphics;
             g.Clear(Theme.Back);
-            var plot = Plot;
             double max = 0;
             foreach (var v in values) max = Math.Max(max, v);
             double step;
             double top = NiceMax(Math.Max(max, 1), out step);
+            float widest = 0;
+            for (double v = 0; v <= top + 0.1; v += step) widest = Math.Max(widest, g.MeasureString(AxisLabel(v), Font).Width);
+            PadL = (int)Math.Ceiling(widest) + 10;
+            var plot = Plot;
 
             using (var tb = new SolidBrush(Theme.Text))
             using (var bold = new Font(Font, FontStyle.Bold))
@@ -215,10 +233,12 @@ namespace UsageTracker.Ui
                     var sz = g.MeasureString(s, Font);
                     g.DrawString(s, Font, mb, plot.Left - sz.Width - 4, y - sz.Height / 2);
                 }
-                float bw = plot.Width / 24f;
-                for (int h = 0; h < 24; h += 3)
+                int n = values.Length;
+                float bw = plot.Width / n;
+                for (int h = 0; h < n; h++)
                 {
-                    string s = h + "시";
+                    string s = axisLabels != null && h < axisLabels.Length ? axisLabels[h] : null;
+                    if (s == null) continue;
                     var sz = g.MeasureString(s, Font);
                     g.DrawString(s, Font, mb, plot.Left + bw * h + bw / 2 - sz.Width / 2, plot.Bottom + 2);
                 }
@@ -226,14 +246,17 @@ namespace UsageTracker.Ui
 
             // 막대: 2px 간격, 위쪽만 둥글게
             g.SmoothingMode = SmoothingMode.AntiAlias;
-            float w = plot.Width / 24f;
+            int count = values.Length;
+            float w = plot.Width / count;
+            float gap = w > 6 ? 1 : 0;   // 막대 사이 2px 간격 (아주 좁으면 생략)
             using (var b = new SolidBrush(BarColor.IsEmpty ? Theme.Accent : BarColor))
             {
-                for (int h = 0; h < 24; h++)
+                for (int h = 0; h < count; h++)
                 {
                     if (values[h] <= 0) continue;
                     float bh = Math.Max(2, (float)(values[h] / top * plot.Height));
-                    var r = new RectangleF(plot.Left + w * h + 1, plot.Bottom - bh, w - 2, bh);
+                    float barW = Math.Min(w - 2 * gap, 40);   // 막대가 몇 개 안 될 때 너무 넓어지지 않게
+                    var r = new RectangleF(plot.Left + w * h + (w - barW) / 2, plot.Bottom - bh, barW, bh);
                     FillTopRounded(g, b, r, Math.Min(4, Math.Min(r.Width / 2, r.Height)));
                     if (h == lastHour)
                         using (var hl = new SolidBrush(Color.FromArgb(40, Theme.Text))) g.FillRectangle(hl, r);
@@ -264,12 +287,12 @@ namespace UsageTracker.Ui
             var plot = Plot;
             int h = -1;
             if (e.X >= plot.Left && e.X < plot.Right && e.Y >= plot.Top - 4 && e.Y <= plot.Bottom)
-                h = Math.Min(23, (int)((e.X - plot.Left) / (plot.Width / 24f)));
+                h = Math.Min(values.Length - 1, (int)((e.X - plot.Left) / (plot.Width / values.Length)));
             if (h != lastHour)
             {
                 lastHour = h;
                 if (h < 0) tip.Hide(this);
-                else tip.Show(h + "시–" + (h + 1) + "시\n" + Fmt.Long(values[h]), this, e.X + 12, e.Y + 16);
+                else tip.Show((tipLabels != null && h < tipLabels.Length ? tipLabels[h] : "") + "\n" + Fmt.Long(values[h]), this, e.X + 12, e.Y + 16);
                 Invalidate();
             }
         }

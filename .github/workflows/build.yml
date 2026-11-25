@@ -1,0 +1,34 @@
+name: build
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build (.NET Framework 4.8 csc)
+        shell: powershell
+        run: .\build.ps1
+
+      - name: Self test
+        shell: powershell
+        run: |
+          .\tools\selftest.ps1
+          if ($LASTEXITCODE -ne 0) { throw "self test failed: $LASTEXITCODE failures" }
+
+      - name: Package
+        shell: powershell
+        run: |
+          $v = (Get-Content VERSION -Raw).Trim()
+          Compress-Archive -Path bin\UsageTracker.exe, bin\UsageTracker.exe.config, README.md -DestinationPath "UsageTracker-v$v.zip"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: UsageTracker
+          path: UsageTracker-v*.zip

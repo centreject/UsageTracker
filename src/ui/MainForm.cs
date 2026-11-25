@@ -54,8 +54,11 @@ namespace UsageTracker.Ui
         readonly SplitContainer split = new SplitContainer();
         readonly TableLayoutPanel detail = new TableLayoutPanel();
         readonly HourlyChart hourly = new HourlyChart();
+        readonly HourlyChart trend = new HourlyChart();      // 주·월·년의 날짜별(월별) 추이
+        readonly TableLayoutPanel charts = new TableLayoutPanel();
         readonly Label summary = new Label();
         readonly Label status = new Label();
+        readonly LinkLabel startLink = new LinkLabel();
         readonly Timer refreshTimer = new Timer { Interval = 60000 };
         readonly Font titleFont, boldFont;
 
@@ -237,22 +240,41 @@ namespace UsageTracker.Ui
             root.Controls.Add(split, 0, 2);
 
             // 4. 시간대별 그래프
-            hourly.Dock = DockStyle.Fill;
-            hourly.Theme = theme;
-            hourly.Margin = new Padding(0, 0, 0, 4);
-            root.Controls.Add(hourly, 0, 3);
+            charts.Dock = DockStyle.Fill;
+            charts.ColumnCount = 2;
+            charts.RowCount = 1;
+            charts.Margin = new Padding(0, 0, 0, 4);
+            charts.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 0));
+            charts.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+            foreach (var c in new[] { trend, hourly })
+            {
+                c.Dock = DockStyle.Fill;
+                c.Theme = theme;
+                c.Margin = Padding.Empty;
+            }
+            charts.Controls.Add(trend, 0, 0);
+            charts.Controls.Add(hourly, 1, 0);
+            root.Controls.Add(charts, 0, 3);
 
             // 5. 요약
-            var bottom = new TableLayoutPanel { Dock = DockStyle.Fill, AutoSize = true, ColumnCount = 2, Margin = Padding.Empty };
+            var bottom = new TableLayoutPanel { Dock = DockStyle.Fill, AutoSize = true, ColumnCount = 3, Margin = Padding.Empty };
             bottom.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+            bottom.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
             bottom.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
             summary.AutoSize = true;
             summary.Margin = new Padding(0, 4, 0, 0);
             status.AutoSize = true;
             status.Tag = "subtle";
             status.Margin = new Padding(0, 4, 0, 0);
+            // 시작 메뉴에서 열었는데 기록 프로그램이 꺼져 있으면 여기서 켤 수 있게
+            startLink.Text = "기록 시작";
+            startLink.AutoSize = true;
+            startLink.Visible = false;
+            startLink.Margin = new Padding(8, 4, 0, 0);
+            startLink.LinkClicked += (s, e) => StartRecorder();
             bottom.Controls.Add(summary, 0, 0);
             bottom.Controls.Add(status, 1, 0);
+            bottom.Controls.Add(startLink, 2, 0);
             root.Controls.Add(bottom, 0, 4);
         }
 
@@ -391,6 +413,19 @@ namespace UsageTracker.Ui
             RefreshData();
         }
 
+        void StartRecorder()
+        {
+            try
+            {
+                string args = DevMode ? "\"--data=" + dataDir + "\"" : "";
+                Process.Start(Application.ExecutablePath, args);
+            }
+            catch (Exception ex) { MessageBox.Show(this, "기록 프로그램을 켜지 못했어요: " + ex.Message, WindowTitle); return; }
+            var t = new Timer { Interval = 1500 };
+            t.Tick += (s, e) => { t.Stop(); t.Dispose(); RefreshData(); };
+            t.Start();
+        }
+
         void OpenSettings()
         {
             using (var f = new SettingsForm(theme, dataDir, DevMode))
@@ -527,6 +562,7 @@ namespace UsageTracker.Ui
                 + (hiddenCount > 0 ? "   ·   숨김 " + hiddenCount + "개" : "");
             if (!status.Text.StartsWith("기록을"))
                 status.Text = recorderAlive ? "기록 중 · " + now.ToString("HH:mm") + " 기준" : "기록 프로그램이 꺼져 있어요";
+            startLink.Visible = !recorderAlive;
             OnSelection();
         }
 
@@ -609,15 +645,52 @@ namespace UsageTracker.Ui
             timeline.Selected = key;
             timeline.Invalidate();
 
-            if (key == null)
-                hourly.SetData(sum.HourlyAll, "시간대별 활성 시간 · 전체" + (period == Period.Day ? "" : " (기간 합계)"), Color.Empty);
-            else
+            string who = key == null ? "전체" : catalog.DisplayName(key);
+            Color color = key == null ? Color.Empty : theme.SlotColor(catalog.SlotOf(key));
+            double[] h = null;
+            if (key == null) h = sum.HourlyAll; else sum.HourlyActive.TryGetValue(key, out h);
+            hourly.SetData(h, "시간대별 · " + who + (period == Period.Day ? "" : " (기간 합계)"), color);
+
+            // 주·월·년: 날짜별(년은 월별) 추이
+            bool showTrend = period != Period.Day;
+            trend.Visible = showTrend;
+            charts.ColumnStyles[0] = showTrend ? new ColumnStyle(SizeType.Percent, 58) : new ColumnStyle(SizeType.Absolute, 0);
+            charts.ColumnStyles[1] = new ColumnStyle(SizeType.Percent, showTrend ? 42 : 100);
+            if (showTrend)
             {
-                double[] h;
-                sum.HourlyActive.TryGetValue(key, out h);
-                hourly.SetData(h, "시간대별 활성 시간 · " + catalog.DisplayName(key) + (period == Period.Day ? "" : " (기간 합계)"), theme.SlotColor(catalog.SlotOf(key)));
+                Dictionary<DateTime, double> daily = null;
+                if (key == null) daily = sum.DailyAll; else sum.DailyActive.TryGetValue(key, out daily);
+                SetTrend(daily ?? new Dictionary<DateTime, double>(), who, color);
             }
             ShowDetail(key);
+        }
+
+        void SetTrend(Dictionary<DateTime, double> daily, string who, Color color)
+        {
+            var ko = CultureInfo.GetCultureInfo("ko-KR");
+            DateTime from, to;
+            PeriodRange(out from, out to);
+            double[] vals; string[] axis, tips;
+            if (period == Period.Year)
+            {
+                vals = new double[12]; axis = new string[12]; tips = new string[12];
+                foreach (var kv in daily) vals[kv.Key.Month - 1] += kv.Value;
+                for (int m = 0; m < 12; m++) { axis[m] = (m + 1) + "월"; tips[m] = from.Year + "년 " + (m + 1) + "월"; }
+                trend.SetBars(vals, axis, tips, "월별 · " + who, color);
+                return;
+            }
+            int n = (int)(to - from).TotalDays;
+            vals = new double[n]; axis = new string[n]; tips = new string[n];
+            for (int i = 0; i < n; i++)
+            {
+                var d = from.AddDays(i);
+                double v; daily.TryGetValue(d, out v);
+                vals[i] = v;
+                axis[i] = period == Period.Week ? d.ToString("ddd", ko)
+                        : (d.Day == 1 || d.Day % 5 == 0) ? d.Day.ToString() : null;
+                tips[i] = d.ToString("M월 d일 (ddd)", ko);
+            }
+            trend.SetBars(vals, axis, tips, "날짜별 · " + who, color);
         }
 
         void ShowDetail(string key)

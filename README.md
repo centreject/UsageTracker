@@ -1,5 +1,7 @@
 # UsageTracker
 
+[![build](https://github.com/centreject/UsageTracker/actions/workflows/build.yml/badge.svg)](https://github.com/centreject/UsageTracker/actions/workflows/build.yml)
+
 Windows 데스크탑용 프로그램 사용 시간 기록 앱. 백그라운드에 상주하면서 프로그램별 사용 시간을 기록하고, 일·주·월·년 단위로 보여 준다. CPU와 메모리 점유를 최소화하는 것이 최우선 목표다.
 
 ## 상태
@@ -16,7 +18,7 @@ Windows 데스크탑용 프로그램 사용 시간 기록 앱. 백그라운드�
 ## 설치
 
 1. [Releases](https://github.com/centreject/UsageTracker/releases)에서 `UsageTracker-v*.zip`을 받아 원하는 폴더에 푼다. 서명하지 않은 exe라 처음 실행할 때 Windows SmartScreen 경고가 나올 수 있다 ("추가 정보" → "실행").
-2. `UsageTracker.exe`를 실행하면 트레이에 상주하고, Windows 시작 시 자동 실행으로 등록된다 (트레이 메뉴·설정에서 끌 수 있다).
+2. `UsageTracker.exe`를 실행하면 트레이에 상주하고, Windows 시작 시 자동 실행과 시작 메뉴 바로가기("사용 시간 기록")가 등록된다 (자동 시작은 트레이 메뉴·설정에서 끌 수 있다).
 3. 지울 때는 설정 → "제거 준비"를 누른 뒤 프로그램 폴더를 지운다.
 
 소스에서 설치하려면 `.\tools\install.ps1`을 실행한다 (`%LOCALAPPDATA%\Programs\UsageTracker`에 복사 후 실행).

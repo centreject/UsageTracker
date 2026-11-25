@@ -79,7 +79,7 @@ namespace UsageTracker
             string exe = System.IO.Path.GetFileName(path);
             if (ShellExes.Contains(exe)) return null;
             if (exe.Equals("explorer.exe", StringComparison.OrdinalIgnoreCase) && ExplorerShellClasses.Contains(cls)) return null;
-            return Register(path);
+            return Register(path, pid);
         }
 
         /// <summary>실행 시간 집계용 앱 ID. explorer.exe·시스템 화면·자기 자신은 null.</summary>
@@ -95,7 +95,7 @@ namespace UsageTracker
             if (path == null || IsSelf(path)) return null;
             string exe = System.IO.Path.GetFileName(path);
             if (ShellExes.Contains(exe) || exe.Equals("explorer.exe", StringComparison.OrdinalIgnoreCase)) return null;
-            return Register(path);
+            return Register(path, pid);
         }
 
         bool IsSelf(string path)
@@ -114,9 +114,15 @@ namespace UsageTracker
             return DesktopId;
         }
 
-        string Register(string path)
+        string Register(string path, uint pid)
         {
             AppInfo a;
+            string exeName = System.IO.Path.GetFileName(path);
+            if (pid != 0 && HostApps.IsHost(exeName))
+            {
+                string hostId = RegisterHost(path, exeName, pid);
+                if (hostId != null) return hostId;
+            }
             if (byPath.TryGetValue(path, out a)) return a.Id;
 
             string id = System.IO.Path.GetFileName(path).ToLowerInvariant();
@@ -127,6 +133,25 @@ namespace UsageTracker
                 newApps.Add(a);
             }
             byPath[path] = a;
+            return a.Id;
+        }
+
+        /// <summary>실행기 exe(java·python 등)는 실행 대상별 ID: "python.exe:bot.py". 대상을 못 찾으면 null (exe 단위로 기록).</summary>
+        string RegisterHost(string hostPath, string exeName, uint pid)
+        {
+            var target = HostApps.Target(exeName, HostApps.CommandLine(pid));
+            if (target == null) return null;
+            string id = exeName.ToLowerInvariant() + ":" + target.Item1.ToLowerInvariant();
+            AppInfo a;
+            if (!known.TryGetValue(id, out a))
+            {
+                string host = ReadName(hostPath);
+                string shown = System.IO.Path.GetExtension(target.Item1).Length > 0 && target.Item2 != null
+                    ? System.IO.Path.GetFileNameWithoutExtension(target.Item1) : target.Item1;
+                a = new AppInfo { Id = id, Name = shown + " (" + host + ")", Path = target.Item2 ?? hostPath, FirstSeen = DateTime.Now };
+                known[id] = a;
+                newApps.Add(a);
+            }
             return a.Id;
         }
 

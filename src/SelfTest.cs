@@ -67,6 +67,11 @@ namespace UsageTracker
                 { "T16 앱 기록 삭제 (기록 중)", T16_DeleteApps },
                 { "T17 전체 기록 초기화 (기록 중)", T17_ResetAll },
                 { "T18 기록 모드 없이 삭제", T18_DeleteOffline },
+                { "T19 실행기 exe 실행 대상 구분 (java·python·node·mmc)", T19_HostTargets },
+                { "T20 다른 프로세스 명령줄 읽기", T20_CommandLine },
+                { "T21 소리 판정 기억 (잠깐의 정적)", T21_AudioMemory },
+                { "T22 날짜별 활성 시간", T22_Daily },
+                { "T23 시작 메뉴 바로가기 만들기·유지", T23_Shortcut },
             };
             foreach (var kv in tests)
             {
@@ -445,6 +450,66 @@ namespace UsageTracker
             True("지운 줄이 있음", removed > 0);
             Near("b 기록 없음", 0, Get(s.Active, "b.exe") + Get(s.Running, "b.exe"));
             Near("a 기록은 그대로", 60, Get(s.Active, "a.exe"));
+        }
+
+        static void T19_HostTargets()
+        {
+            Func<string, string, string> name = (exe, cmd) => { var r = HostApps.Target(exe, cmd); return r == null ? null : r.Item1; };
+            True("java -jar", name("javaw.exe", "\"C:\\Java\\bin\\javaw.exe\" -Xmx2G -jar \"D:\\Games\\My Launcher.jar\" --nogui") == "My Launcher.jar");
+            True("java 메인 클래스", name("java.exe", "java -cp lib\\a.jar;b.jar com.example.App arg") == "com.example.App");
+            True("java -m 모듈", name("java.exe", "java -p mods -m org.foo/org.foo.Main") == "org.foo");
+            True("python 스크립트", name("python.exe", "C:\\Python\\python.exe -u C:\\bots\\bot.py --x 1") == "bot.py");
+            True("python -m", name("pythonw.exe", "pythonw.exe -m idlelib") == "idlelib");
+            True("python -c는 구분 안 함", name("python.exe", "python -c \"print(1)\"") == null);
+            True("node 스크립트", name("node.exe", "node --inspect server.js") == "server.js");
+            True("mmc 콘솔", name("mmc.exe", "\"C:\\WINDOWS\\system32\\mmc.exe\" \"C:\\WINDOWS\\system32\\devmgmt.msc\"") == "devmgmt.msc");
+            True("인자 없음", name("python.exe", "python.exe") == null);
+            var full = HostApps.Target("python.exe", "python C:\\bots\\bot.py");
+            True("실행 대상 경로", full != null && full.Item2 == "C:\\bots\\bot.py");
+            True("따옴표·역슬래시 분리", HostApps.Split("a \"b c\" d\\\\\"e f\"").Count == 3);
+        }
+
+        static void T20_CommandLine()
+        {
+            string cmd = HostApps.CommandLine((uint)Process.GetCurrentProcess().Id);
+            True("자기 명령줄을 읽음 (--selftest 포함)", cmd != null && cmd.Contains("--selftest"));
+        }
+
+        static void T21_AudioMemory()
+        {
+            long sec = Stopwatch.Frequency;
+            var m = new AudioMemory(150 * sec);
+            True("들리면 소리 냄", m.Update(new[] { "a.exe" }, 0).Contains("a.exe"));
+            True("60초 뒤 잠깐 조용해도 유지", m.Update(new string[0], 60 * sec).Contains("a.exe"));
+            True("120초 뒤에도 유지", m.Update(new string[0], 120 * sec).Contains("a.exe"));
+            True("180초 동안 조용하면 해제", !m.Update(new string[0], 180 * sec).Contains("a.exe"));
+        }
+
+        static void T22_Daily()
+        {
+            var b = new DateTime(2026, 3, 10, 23, 30, 0);
+            var segs = new List<RawSeg>
+            {
+                new RawSeg { Kind = 'A', AppId = "x.exe", Start = b, End = b.AddMinutes(30) },                  // 3/10 30분
+                new RawSeg { Kind = 'A', AppId = "x.exe", Start = b.AddMinutes(30), End = b.AddMinutes(50) },   // 3/11 20분
+                new RawSeg { Kind = 'A', AppId = "y.exe", Start = b.AddMinutes(50), End = b.AddMinutes(60) },   // 3/11 10분
+            };
+            var s = UsageReader.Summarize(segs, id => id, b.Date, b.Date.AddDays(2));
+            Near("3/10 전체", 1800, s.DailyAll[b.Date]);
+            Near("3/11 전체", 1800, s.DailyAll[b.Date.AddDays(1)]);
+            Near("3/11 x", 1200, s.DailyActive["x.exe"][b.Date.AddDays(1)]);
+        }
+
+        static void T23_Shortcut()
+        {
+            string dir = NewDir();
+            string lnk = Path.Combine(dir, "test.lnk");
+            string exe = Path.Combine(Environment.SystemDirectory, "notepad.exe");
+            True("처음엔 만든다", StartMenu.Ensure(exe, lnk));
+            True("대상 경로가 맞다", string.Equals(StartMenu.Target(lnk), exe, StringComparison.OrdinalIgnoreCase));
+            True("같으면 다시 만들지 않는다", !StartMenu.Ensure(exe, lnk));
+            string other = Path.Combine(Environment.SystemDirectory, "calc.exe");
+            True("exe를 옮기면 고친다", StartMenu.Ensure(other, lnk) && string.Equals(StartMenu.Target(lnk), other, StringComparison.OrdinalIgnoreCase));
         }
 
         static void T15_ExcludeRunning()

@@ -163,7 +163,7 @@ namespace UsageTracker.Ui
 
         void PrepareUninstall()
         {
-            if (MessageBox.Show(this, "자동 시작 등록을 지우고 기록 프로그램을 끝낼까요?\n그 뒤에는 기록되지 않아요.",
+            if (MessageBox.Show(this, "자동 시작 등록과 시작 메뉴 바로가기를 지우고 기록 프로그램을 끝낼까요?\n그 뒤에는 기록되지 않아요.",
                     "제거 준비", MessageBoxButtons.YesNo, MessageBoxIcon.Question, MessageBoxDefaultButton.Button2) != DialogResult.Yes) return;
             bool deleteData = MessageBox.Show(this, "기록 데이터도 지울까요?\n" + dataDir + "\n\n'아니요'를 고르면 데이터는 남겨요.",
                     "제거 준비", MessageBoxButtons.YesNo, MessageBoxIcon.Warning, MessageBoxDefaultButton.Button2) == DialogResult.Yes;
@@ -173,6 +173,7 @@ namespace UsageTracker.Ui
                 settings.AutoStart = false;
                 settings.Save();
                 AutoStart.Apply(false, Application.ExecutablePath);
+                StartMenu.Remove();
             }
             Recorder.CloseAndWait(5000);
             if (deleteData)

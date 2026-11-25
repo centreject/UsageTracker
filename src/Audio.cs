@@ -4,10 +4,52 @@ using System.Runtime.InteropServices;
 
 namespace UsageTracker
 {
-    /// <summary>지금 소리를 내고 있는 프로세스(WASAPI 세션 상태가 Active)를 찾는다. 1분에 한 번만 호출한다.</summary>
+    /// <summary>
+    /// 지금 실제로 소리를 내고 있는 프로세스를 찾는다. 1분에 한 번만 호출한다.
+    /// 세션 상태가 Active여도 소리 크기(peak)가 0이면 소리를 내지 않는 것으로 본다
+    /// (Discord·게임처럼 조용히 세션만 열어 두는 앱 때문에 자리 비움이 안 걸리는 문제 방지).
+    /// </summary>
     static class Audio
     {
         static readonly Guid MMDeviceEnumeratorClsid = new Guid("BCDE0395-E52F-467C-8E3D-C4579291692E");
+        const float SilenceLevel = 0.0001f;
+
+        /// <summary>진단용 (--probe): 모든 세션의 pid·상태·소리 크기.</summary>
+        public static List<string> Describe()
+        {
+            var lines = new List<string>();
+            object enumObj = null; IMMDeviceCollection devices = null;
+            try
+            {
+                enumObj = Activator.CreateInstance(Type.GetTypeFromCLSID(MMDeviceEnumeratorClsid));
+                ((IMMDeviceEnumerator)enumObj).EnumAudioEndpoints(0, 1, out devices);
+                uint count; devices.GetCount(out count);
+                var iid = typeof(IAudioSessionManager2).GUID;
+                for (uint i = 0; i < count; i++)
+                {
+                    IMMDevice dev; object mgrObj; IAudioSessionEnumerator sessions;
+                    devices.Item(i, out dev);
+                    dev.Activate(ref iid, 1, IntPtr.Zero, out mgrObj);
+                    ((IAudioSessionManager2)mgrObj).GetSessionEnumerator(out sessions);
+                    int n; sessions.GetCount(out n);
+                    for (int s = 0; s < n; s++)
+                    {
+                        object ctlObj; sessions.GetSession(s, out ctlObj);
+                        var ctl = (IAudioSessionControl2)ctlObj;
+                        int state; ctl.GetState(out state);
+                        uint pid; ctl.GetProcessId(out pid);
+                        float peak = -1; var meter = ctlObj as IAudioMeterInformation;
+                        if (meter != null) meter.GetPeakValue(out peak);
+                        lines.Add("device " + i + " pid " + pid + " state " + state + " peak " + peak.ToString("0.0000"));
+                        Release(ctlObj);
+                    }
+                    Release(sessions); Release(mgrObj); Release(dev);
+                }
+            }
+            catch (Exception ex) { lines.Add("error: " + ex.Message); }
+            finally { Release(devices); Release(enumObj); }
+            return lines;
+        }
 
         public static HashSet<uint> ActivePids()
         {
@@ -42,6 +84,9 @@ namespace UsageTracker
                                 if (ctl == null) continue;
                                 int state; ctl.GetState(out state);
                                 if (state != 1 /*AudioSessionStateActive*/) continue;
+                                var meter = ctlObj as IAudioMeterInformation;
+                                float peak;
+                                if (meter != null && meter.GetPeakValue(out peak) == 0 && peak < SilenceLevel) continue;
                                 uint pid; ctl.GetProcessId(out pid);
                                 if (pid != 0) result.Add(pid);
                             }
@@ -95,6 +140,38 @@ namespace UsageTracker
     {
         [PreserveSig] int GetCount(out int count);
         [PreserveSig] int GetSession(int index, [MarshalAs(UnmanagedType.IUnknown)] out object session);
+    }
+
+    [ComImport, Guid("C02216F6-8C67-4B5B-9D00-D008E73E0064"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+    interface IAudioMeterInformation
+    {
+        [PreserveSig] int GetPeakValue(out float peak);
+    }
+
+    /// <summary>
+    /// 소리 판정 기억: 영상 속 잠깐의 정적 때문에 자리 비움으로 넘어가지 않도록,
+    /// 최근 window 동안 한 번이라도 소리가 들린 앱은 소리를 내는 중으로 본다.
+    /// </summary>
+    sealed class AudioMemory
+    {
+        readonly Dictionary<string, long> lastHeard = new Dictionary<string, long>(StringComparer.OrdinalIgnoreCase);
+        readonly long windowTs;
+
+        public AudioMemory(long windowTs) { this.windowTs = windowTs; }
+
+        public HashSet<string> Update(IEnumerable<string> heardNow, long nowTs)
+        {
+            foreach (var id in heardNow) lastHeard[id] = nowTs;
+            var result = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var stale = new List<string>();
+            foreach (var kv in lastHeard)
+            {
+                if (nowTs - kv.Value <= windowTs) result.Add(kv.Key);
+                else stale.Add(kv.Key);
+            }
+            foreach (var k in stale) lastHeard.Remove(k);
+            return result;
+        }
     }
 
     [ComImport, Guid("bfb7ff88-7239-4fc9-8fa2-07c950be9c6d"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
