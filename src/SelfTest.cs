@@ -76,6 +76,9 @@ namespace UsageTracker
                 { "T25 즐겨찾기 저장·이전 형식 읽기", T25_Favorites },
                 { "T26 터미널 안 CLI 도구 고르기", T26_CliPick },
                 { "T27 npm CLI 패키지 이름", T27_NodePackage },
+                { "T28 창 있는 앱은 CLI로 또 세지 않음", T28_CliExcludeWindowed },
+                { "T29 CLI 마지막 실행 시각", T29_LastRun },
+                { "T30 통계 창 상태 저장·불러오기", T30_UiPrefs },
             };
             foreach (var kv in tests)
             {
@@ -596,6 +599,47 @@ namespace UsageTracker
             True("node_modules 밖", HostApps.NodePackage(@"C:\proj\server.js") == null);
             var t = HostApps.Target("node.exe", "\"C:\\Program Files\\nodejs\\node.exe\" \"C:\\Users\\u\\AppData\\Roaming\\npm\\node_modules\\@anthropic-ai\\claude-code\\cli.js\" --resume");
             True("node + npm CLI → 패키지 이름", t != null && t.Item1 == "claude-code");
+        }
+
+        static void T28_CliExcludeWindowed()
+        {
+            Func<uint, uint, string, CliApps.Proc> P = (pid, ppid, exe) => new CliApps.Proc { Pid = pid, ParentPid = ppid, Exe = exe };
+            var procs = new List<CliApps.Proc>
+            {
+                P(10, 1, "WindowsTerminal.exe"),
+                P(11, 10, "cmd.exe"),
+                P(12, 11, "claude.exe"),     // 창 없음 → CLI
+                P(13, 11, "notepad.exe"),    // cmd에서 띄운 메모장: 창 있음 → CLI 아님
+            };
+            var picked = CliApps.Pick(procs, new HashSet<uint> { 13 });
+            True("창 있는 notepad는 빠지고 claude만 (실제 " + string.Join(",", picked) + ")", picked.Count == 1 && picked[0] == 12);
+        }
+
+        static void T29_LastRun()
+        {
+            var env = NewEnv(); string dir = NewDir();
+            env.Visible.Add("cli:claude.exe");   // 실행 중인 CLI (활성 기록은 없음)
+            var t = NewTracker(env, dir);
+            env.At(60); env.Visible.Clear(); t.Tick();   // CLI 종료
+            env.At(120); t.Shutdown();
+            var now = env.Base.AddSeconds(200);
+            var lastActive = UsageReader.LastUsed(dir, new[] { "cli:claude.exe" }, now, 'A');
+            var lastRun = UsageReader.LastUsed(dir, new[] { "cli:claude.exe" }, now, 'R');
+            True("활성 기록은 없음", lastActive == null);
+            True("마지막 실행 = 종료 시각", lastRun != null && Math.Abs((lastRun.Value - env.Base.AddSeconds(60)).TotalSeconds) <= 1);
+        }
+
+        static void T30_UiPrefs()
+        {
+            string dir = NewDir();
+            var p = Ui.UiPrefs.Load(dir);
+            True("처음엔 위치 없음", !p.HasBounds && p.SortCol == 1);
+            p.X = 100; p.Y = 50; p.W = 900; p.H = 600; p.Maximized = true; p.Split = 420; p.Period = 2;
+            p.SortCol = 0; p.SortAsc = true; p.ShowHidden = true; p.FavOnly = true;
+            p.Save(dir);
+            var q = Ui.UiPrefs.Load(dir);
+            True("저장한 값 그대로", q.HasBounds && q.X == 100 && q.Y == 50 && q.W == 900 && q.H == 600 && q.Maximized
+                && q.Split == 420 && q.Period == 2 && q.SortCol == 0 && q.SortAsc && q.ShowHidden && q.FavOnly);
         }
 
         static void T15_ExcludeRunning()

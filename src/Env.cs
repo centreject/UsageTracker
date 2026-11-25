@@ -56,8 +56,10 @@ namespace UsageTracker
         {
             var set = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             var cache = pathCache;
+            var windowPids = new HashSet<uint>();   // 보이는 창이 하나라도 있는 프로세스 (CLI에서 뺀다)
             Native.EnumWindows((h, l) =>
             {
+                if (Native.IsWindowVisible(h)) windowPids.Add(Native.WindowPid(h));
                 if (!Native.IsWindowVisible(h) || Native.GetWindow(h, Native.GW_OWNER) != IntPtr.Zero) return true;
                 if ((Native.GetWindowLong(h, Native.GWL_EXSTYLE) & Native.WS_EX_TOOLWINDOW) != 0) return true;
                 if (Native.GetWindowTextLength(h) == 0) return true;
@@ -79,7 +81,7 @@ namespace UsageTracker
             // 터미널 안의 CLI 도구 (창이 없어서 위에서는 안 잡힌다)
             try
             {
-                foreach (uint pid in CliApps.Pick(CliApps.Snapshot()))
+                foreach (uint pid in CliApps.Pick(CliApps.Snapshot(), windowPids))
                 {
                     string id = apps.CliApp(pid);
                     if (id != null) set.Add(id);

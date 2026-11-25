@@ -226,8 +226,11 @@ namespace UsageTracker
             }
         }
 
-        /// <summary>앱(들)이 마지막으로 활성이었던 시각. 지금 활성 중이면 now. 최근 24개월만 찾는다.</summary>
-        public static DateTime? LastUsed(string dir, ICollection<string> ids, DateTime now)
+        /// <summary>
+        /// 앱(들)이 마지막으로 활성(kind='A') 또는 실행(kind='R', CLI용)이었던 시각.
+        /// 지금 그 상태면 now. 최근 24개월만 찾는다.
+        /// </summary>
+        public static DateTime? LastUsed(string dir, ICollection<string> ids, DateTime now, char kind = 'A')
         {
             var set = new HashSet<string>(ids, StringComparer.OrdinalIgnoreCase);
             var month = new DateTime(now.Year, now.Month, 1);
@@ -240,7 +243,7 @@ namespace UsageTracker
                 var open = new HashSet<long>();
                 foreach (var r in pf.Records)
                 {
-                    if (r.Kind != 'A' || !set.Contains(r.App)) continue;
+                    if (r.Kind != kind || !set.Contains(r.App)) continue;
                     if (r.Open) { open.Add(r.Start.Ticks); continue; }
                     if (r.End > best) best = r.End;
                     open.Remove(r.Start.Ticks);

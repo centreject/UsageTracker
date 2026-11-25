@@ -36,8 +36,11 @@ namespace UsageTracker
             public string Exe;
         }
 
-        /// <summary>프로세스 목록에서 CLI 도구의 pid를 고른다 (시험할 수 있게 순수 함수로 둔다).</summary>
-        public static List<uint> Pick(List<Proc> procs)
+        /// <summary>
+        /// 프로세스 목록에서 CLI 도구의 pid를 고른다 (시험할 수 있게 순수 함수로 둔다).
+        /// exclude: 창이 있는 프로세스 (터미널에서 실행했어도 창 있는 앱은 이미 앱으로 세므로 CLI로 또 세지 않는다).
+        /// </summary>
+        public static List<uint> Pick(List<Proc> procs, ICollection<uint> exclude = null)
         {
             var byPid = new Dictionary<uint, Proc>();
             foreach (var p in procs) byPid[p.Pid] = p;
@@ -46,6 +49,7 @@ namespace UsageTracker
             foreach (var p in procs)
             {
                 if (Shells.Contains(p.Exe) || Ignored.Contains(p.Exe)) continue;
+                if (exclude != null && exclude.Contains(p.Pid)) continue;
                 Proc parent;
                 if (!byPid.TryGetValue(p.ParentPid, out parent) || !Shells.Contains(parent.Exe)) continue;
                 if (IsInteractiveShell(parent, byPid, interactive, 0)) result.Add(p.Pid);
@@ -68,17 +72,30 @@ namespace UsageTracker
             return v;
         }
 
-        /// <summary>지금 실행 중인 프로세스 목록 (Toolhelp 스냅숏, 1분에 한 번).</summary>
+        [DllImport("kernel32.dll")] static extern bool ProcessIdToSessionId(uint pid, out uint session);
+
+        /// <summary>
+        /// 지금 실행 중인 프로세스 목록 (Toolhelp 스냅숏, 1분에 한 번).
+        /// 같은 로그인 세션의 프로세스만 담는다 (사용자 전환으로 함께 로그인한 다른 계정의 터미널은 세지 않음).
+        /// </summary>
         public static List<Proc> Snapshot()
         {
             var list = new List<Proc>();
+            uint mySession;
+            if (!ProcessIdToSessionId((uint)Native.GetCurrentProcessId(), out mySession)) mySession = uint.MaxValue;
             IntPtr snap = Native.CreateToolhelp32Snapshot(0x2 /*TH32CS_SNAPPROCESS*/, 0);
             if (snap == IntPtr.Zero || snap == new IntPtr(-1)) return list;
             try
             {
                 var e = new Native.PROCESSENTRY32 { dwSize = (uint)Marshal.SizeOf(typeof(Native.PROCESSENTRY32)) };
                 if (!Native.Process32First(snap, ref e)) return list;
-                do list.Add(new Proc { Pid = e.th32ProcessID, ParentPid = e.th32ParentProcessID, Exe = e.szExeFile });
+                do
+                {
+                    uint s;
+                    // 다른 세션이면 뺀다. 세션을 못 읽는 프로세스(보호 프로세스 등)는 셸·도구가 아니므로 함께 빠져도 된다
+                    if (mySession != uint.MaxValue && (!ProcessIdToSessionId(e.th32ProcessID, out s) || s != mySession)) continue;
+                    list.Add(new Proc { Pid = e.th32ProcessID, ParentPid = e.th32ParentProcessID, Exe = e.szExeFile });
+                }
                 while (Native.Process32Next(snap, ref e));
             }
             finally { Native.CloseHandle(snap); }

@@ -17,12 +17,14 @@ namespace UsageTracker.Ui
             Recorder.DataDir = dataDir;
             int view = 0; string select = null;
             bool settingsOnly = false, devMode = false, favOnly = false;
+            string search = null;
             foreach (var a in args)
             {
                 if (a.StartsWith("--view=")) int.TryParse(a.Substring(7), out view);
                 else if (a.StartsWith("--select=")) select = a.Substring(9);
                 else if (a == "--settings") settingsOnly = true;
                 else if (a == "--favonly") favOnly = true;
+                else if (a.StartsWith("--search=")) search = a.Substring(9);
                 else if (a.StartsWith("--theme=")) Theme.Forced = a.Substring(8);
                 else if (a.StartsWith("--data=")) devMode = true;
             }
@@ -52,7 +54,7 @@ namespace UsageTracker.Ui
                 Application.EnableVisualStyles();
                 Application.SetCompatibleTextRenderingDefault(false);
                 Application.ThreadException += (s, e) => ErrorLog.Write("ui", e.Exception);
-                Application.Run(new MainForm(dataDir) { InitialView = view, InitialSelect = select, DevMode = devMode, InitialFavOnly = favOnly });
+                Application.Run(new MainForm(dataDir) { InitialView = view, InitialSelect = select, DevMode = devMode, InitialFavOnly = favOnly, InitialSearch = search });
             }
             return 0;
         }

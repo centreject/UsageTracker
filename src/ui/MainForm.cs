@@ -33,6 +33,8 @@ namespace UsageTracker.Ui
         public bool DevMode;                       // --data로 실행 (자동 시작을 건드리지 않음)
         readonly CheckBox showHiddenBox = new CheckBox();
         readonly CheckBox favOnlyBox = new CheckBox();
+        readonly TextBox searchBox = new TextBox();
+        string search = "";
         bool favOnly;
         readonly Button settingsBtn = new Button();
         readonly ContextMenuStrip menu = new ContextMenuStrip();
@@ -71,6 +73,7 @@ namespace UsageTracker.Ui
         public int InitialView;
         public string InitialSelect;
         public bool InitialFavOnly;   // --favonly (화면 확인용)
+        public string InitialSearch;  // --search= (화면 확인용)
 
         public MainForm(string dataDir)
         {
@@ -117,15 +120,54 @@ namespace UsageTracker.Ui
             };
             Microsoft.Win32.SystemEvents.UserPreferenceChanged += onPref;
             FormClosed += (s, e) => Microsoft.Win32.SystemEvents.UserPreferenceChanged -= onPref;
+            // 지난번 창 상태 (위치·크기·탭·정렬·필터). 화면 밖이면 무시
+            prefs = UiPrefs.Load(dataDir);
+            if (prefs.HasBounds)
+            {
+                var r = new Rectangle(prefs.X, prefs.Y, prefs.W, prefs.H);
+                foreach (var scr in Screen.AllScreens)
+                    if (scr.WorkingArea.IntersectsWith(new Rectangle(r.X + 40, r.Y + 10, 120, 40)))
+                    {
+                        StartPosition = FormStartPosition.Manual;
+                        Bounds = r;
+                        break;
+                    }
+            }
+            if (prefs.Maximized) WindowState = FormWindowState.Maximized;
+            sortCol = prefs.SortCol;
+            sortAsc = prefs.SortAsc;
+            FormClosing += (s, e) => SavePrefs();
+
             Load += (s, e) =>
             {
                 Themer.TitleBar(this, theme);
-                split.SplitterDistance = Math.Max(300, split.Width - 330);
-                if (InitialFavOnly) favOnlyBox.Checked = true;
-                if (InitialView > 0 && InitialView < 4) tabs[InitialView].Checked = true;   // RefreshData 호출됨
+                // 상세 패널: 창 폭의 30% (240~330px). 저장한 경계가 지금 창에 맞으면 그대로
+                int detailW = Math.Max(240, Math.Min(330, split.Width * 3 / 10));
+                split.SplitterDistance = prefs.Split >= 300 && prefs.Split <= split.Width - 240 ? prefs.Split : Math.Max(300, split.Width - detailW);
+                showHiddenBox.Checked = prefs.ShowHidden;
+                favOnlyBox.Checked = InitialFavOnly || prefs.FavOnly;
+                int view = InitialView > 0 ? InitialView : prefs.Period;
+                if (view > 0 && view < 4) tabs[view].Checked = true;   // RefreshData 호출됨
                 else RefreshData();
+                if (InitialSearch != null) searchBox.Text = InitialSearch;
                 if (InitialSelect != null) SelectKey(InitialSelect);
             };
+        }
+
+        readonly UiPrefs prefs;
+
+        void SavePrefs()
+        {
+            var b = WindowState == FormWindowState.Normal ? Bounds : RestoreBounds;
+            prefs.X = b.X; prefs.Y = b.Y; prefs.W = b.Width; prefs.H = b.Height;
+            prefs.Maximized = WindowState == FormWindowState.Maximized;
+            prefs.Split = split.SplitterDistance;
+            prefs.Period = (int)period;
+            prefs.SortCol = sortCol;
+            prefs.SortAsc = sortAsc;
+            prefs.ShowHidden = showHidden;
+            prefs.FavOnly = favOnly;
+            prefs.Save(dataDir);
         }
 
         int ScreenDpi()
@@ -138,6 +180,7 @@ namespace UsageTracker.Ui
         void BuildLayout()
         {
             var root = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 5, Padding = new Padding(12, 8, 12, 8), BackColor = theme.Back };
+            root.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));   // 창 폭을 넘지 않게
             root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
             root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
             root.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
@@ -146,7 +189,8 @@ namespace UsageTracker.Ui
             Controls.Add(root);
 
             // 1. 기간 탭과 이동
-            var top = new TableLayoutPanel { Dock = DockStyle.Fill, AutoSize = true, ColumnCount = 2, Margin = new Padding(0, 0, 0, 6) };
+            var top = new TableLayoutPanel { Dock = DockStyle.Fill, AutoSize = true, ColumnCount = 2, RowCount = 2, Margin = new Padding(0, 0, 0, 6) };
+            var filterBar = new FlowLayoutPanel { AutoSize = true, WrapContents = false, Margin = new Padding(0, 6, 0, 0), Dock = DockStyle.Fill };
             top.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
             top.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
             var tabBar = new FlowLayoutPanel { AutoSize = true, WrapContents = false, Margin = Padding.Empty };
@@ -172,15 +216,25 @@ namespace UsageTracker.Ui
             }
             showHiddenBox.Text = "숨긴 항목 보기";
             showHiddenBox.AutoSize = true;
-            showHiddenBox.Margin = new Padding(16, 7, 0, 0);
+            showHiddenBox.Margin = new Padding(14, 7, 0, 0);
             showHiddenBox.CheckedChanged += (s, e) => { showHidden = showHiddenBox.Checked; RefreshData(); };
-            tabBar.Controls.Add(showHiddenBox);
+            filterBar.Controls.Add(showHiddenBox);
             favOnlyBox.Text = "★ 즐겨찾기만";
             favOnlyBox.AutoSize = true;
             favOnlyBox.Margin = new Padding(12, 7, 0, 0);
             favOnlyBox.CheckedChanged += (s, e) => { favOnly = favOnlyBox.Checked; Populate(SelectedKeys()); OnSelection(); };
-            tabBar.Controls.Add(favOnlyBox);
+            filterBar.Controls.Add(favOnlyBox);
+            searchBox.Width = 200;
+            searchBox.Margin = new Padding(0, 4, 0, 0);
+            searchBox.TextChanged += (s, e) => { search = searchBox.Text.Trim(); Populate(SelectedKeys()); };
+            searchBox.KeyDown += (s, e) => { if (e.KeyCode == Keys.Escape) { searchBox.Clear(); e.Handled = e.SuppressKeyPress = true; } };
+            searchBox.HandleCreated += (s, e) => SendMessage(searchBox.Handle, 0x1501 /*EM_SETCUEBANNER*/, (IntPtr)1, "앱 검색 (Ctrl+F)");
+            filterBar.Controls.Add(searchBox);
+            filterBar.Controls.SetChildIndex(searchBox, 0);   // 검색칸을 맨 앞에
             top.Controls.Add(tabBar, 0, 0);
+            // 둘째 줄: 검색·필터 (첫 줄에 두면 좁은 창에서 기간 이동 버튼이 밀려난다)
+            top.Controls.Add(filterBar, 0, 1);
+            top.SetColumnSpan(filterBar, 2);
 
             var nav = new FlowLayoutPanel { AutoSize = true, WrapContents = false, Anchor = AnchorStyles.Right, Margin = Padding.Empty };
             settingsBtn.Text = "설정";
@@ -340,6 +394,18 @@ namespace UsageTracker.Ui
         }
 
         int StarWidth { get { return images.ImageSize.Width; } }
+
+        /// <summary>검색: 표시 이름이나 원래 이름에 검색어가 들어 있으면.</summary>
+        bool Matches(Row r)
+        {
+            var ci = CultureInfo.CurrentCulture.CompareInfo;
+            if (ci.IndexOf(r.Name, search, CompareOptions.IgnoreCase) >= 0) return true;
+            if (r.Key != HiddenKey && ci.IndexOf(catalog.OriginalName(r.Key), search, CompareOptions.IgnoreCase) >= 0) return true;
+            return false;
+        }
+
+        [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+        static extern IntPtr SendMessage(IntPtr h, uint msg, IntPtr w, string l);
 
         /// <summary>목록 칸 그리기: 테마 색 배경·선택 색, 첫 칸은 아이콘 + 이름.</summary>
         void DrawCell(object sender, DrawListViewSubItemEventArgs e)
@@ -546,6 +612,7 @@ namespace UsageTracker.Ui
         protected override void OnKeyDown(KeyEventArgs e)
         {
             if (e.KeyCode == Keys.F5) { RefreshData(); e.Handled = true; }
+            else if (e.Control && e.KeyCode == Keys.F) { searchBox.Focus(); searchBox.SelectAll(); e.Handled = true; }
             else if (e.KeyCode == Keys.F2 && list.Focused) { Rename(); e.Handled = true; }
             else if (e.Alt && e.KeyCode == Keys.Left) { MovePeriod(-1); e.Handled = true; }
             else if (e.Alt && e.KeyCode == Keys.Right) { MovePeriod(1); e.Handled = true; }
@@ -722,6 +789,7 @@ namespace UsageTracker.Ui
             foreach (var r in rows)
             {
                 if (favOnly && !r.Favorite) continue;   // 보기만 거른다 (합계·비율은 그대로)
+                if (search.Length > 0 && !Matches(r)) continue;
                 if (!images.Images.ContainsKey(r.Key))
                     images.Images.Add(r.Key, icons.Get(r.Key, PathOf(r.Key)));
                 var item = new ListViewItem(r.Hidden && r.Key != HiddenKey ? r.Name + " (숨김)" : r.Name, r.Key) { Tag = r };
@@ -881,8 +949,12 @@ namespace UsageTracker.Ui
                 DateTime first = DateTime.MaxValue;
                 foreach (var id in ids) { AppInfo a; if (catalog.Info.TryGetValue(id, out a) && a.FirstSeen > DateTime.MinValue && a.FirstSeen < first) first = a.FirstSeen; }
                 if (first < DateTime.MaxValue) AddField("처음 기록", first.ToString("yyyy-MM-dd HH:mm"));
-                var last = UsageReader.LastUsed(dataDir, ids, DateTime.Now);
-                AddField("마지막 사용", last == null ? "–" : (last.Value >= DateTime.Now.AddMinutes(-1) ? "지금 사용 중" : last.Value.ToString("yyyy-MM-dd HH:mm")));
+                // CLI는 활성 시간이 없으므로(터미널 창이 가져감) 실행 기록으로 찾는다
+                bool cli = ids.Count > 0 && ids.TrueForAll(id => id.StartsWith("cli:", StringComparison.OrdinalIgnoreCase));
+                var last = UsageReader.LastUsed(dataDir, ids, DateTime.Now, cli ? 'R' : 'A');
+                AddField(cli ? "마지막 실행" : "마지막 사용", last == null ? "–"
+                    : (last.Value >= DateTime.Now.AddMinutes(-1) ? (cli ? "지금 실행 중" : "지금 사용 중") : last.Value.ToString("yyyy-MM-dd HH:mm")));
+                if (cli) AddNote("터미널 안에서 실행된 프로그램이에요. 사용(활성) 시간은 터미널 창에 쌓이고, 여기에는 실행 시간만 기록돼요.");
 
                 if (group)
                 {
