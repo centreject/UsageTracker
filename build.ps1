@@ -17,9 +17,11 @@ $info = Join-Path $out 'AssemblyInfo.g.cs'
 [assembly: System.Reflection.AssemblyInformationalVersion("$version")]
 "@ | Set-Content -Encoding UTF8 $info
 
-$sources = @(Get-ChildItem (Join-Path $root 'src') -Filter *.cs | ForEach-Object FullName) + $info
+$sources = @(Get-ChildItem (Join-Path $root 'src') -Filter *.cs -Recurse | ForEach-Object FullName) + $info
+$manifest = Join-Path $root 'src\app.manifest'
 & $csc /nologo /target:winexe /optimize+ /codepage:65001 /platform:x64 /warn:4 `
-    "/out:$(Join-Path $out 'UsageTracker.exe')" $sources
+    /r:System.Windows.Forms.dll /r:System.Drawing.dll /r:System.Core.dll `
+    "/win32manifest:$manifest" "/out:$(Join-Path $out 'UsageTracker.exe')" $sources
 if ($LASTEXITCODE -ne 0) { throw "Build failed" }
 Copy-Item (Join-Path $root 'src\app.config') (Join-Path $out 'UsageTracker.exe.config') -Force
 Write-Host "Built $out\UsageTracker.exe (v$version)"

@@ -1,0 +1,552 @@
+using System;
+using System.Collections.Generic;
+using System.Diagnostics;
+using System.Drawing;
+using System.Globalization;
+using System.IO;
+using System.Linq;
+using System.Runtime.InteropServices;
+using System.Windows.Forms;
+
+namespace UsageTracker.Ui
+{
+    /// <summary>
+    /// 화면 모드 메인 창. 위에서부터: 기간 탭·이동 / 타임라인(일 탭만) / 목록 + 상세 / 시간대별 그래프 / 요약.
+    /// </summary>
+    sealed class MainForm : Form
+    {
+        public const string WindowTitle = "사용 시간 기록";
+
+        enum Period { Day, Week, Month, Year }
+
+        sealed class Row
+        {
+            public string Key, Name;
+            public double Active, Running, Ratio;
+        }
+
+        readonly string dataDir;
+        readonly Theme theme = Theme.Light();
+        AppCatalog catalog;
+        readonly IconCache icons;
+        readonly ImageList images = new ImageList { ColorDepth = ColorDepth.Depth32Bit };
+        Period period = Period.Day;
+        DateTime anchor = DateTime.Today;
+        UsageSummary sum, sumRaw;
+        List<Row> rows = new List<Row>();
+        int sortCol = 1;
+        bool sortAsc;
+        bool recorderAlive;
+
+        // 컨트롤
+        readonly RadioButton[] tabs = new RadioButton[4];
+        readonly Button prevBtn = new Button(), nextBtn = new Button(), todayBtn = new Button();
+        readonly Label periodLabel = new Label();
+        readonly TimelineControl timeline = new TimelineControl();
+        readonly ListView list = new ListView();
+        readonly SplitContainer split = new SplitContainer();
+        readonly TableLayoutPanel detail = new TableLayoutPanel();
+        readonly HourlyChart hourly = new HourlyChart();
+        readonly Label summary = new Label();
+        readonly Label status = new Label();
+        readonly Timer refreshTimer = new Timer { Interval = 60000 };
+        readonly Font titleFont, boldFont;
+
+        /// <summary>처음 보여 줄 기간(0=일 1=주 2=월 3=년)과 선택할 앱. 화면 확인용 (--view=, --select=).</summary>
+        public int InitialView;
+        public string InitialSelect;
+
+        public MainForm(string dataDir)
+        {
+            this.dataDir = dataDir;
+            Text = WindowTitle;
+            Font = SystemFonts.MessageBoxFont;
+            titleFont = new Font(Font.FontFamily, Font.Size * 1.5f, FontStyle.Bold);
+            boldFont = new Font(Font, FontStyle.Bold);
+            AutoScaleMode = AutoScaleMode.Dpi;
+            StartPosition = FormStartPosition.CenterScreen;
+            Size = new Size(1080, 760);
+            MinimumSize = new Size(780, 560);
+            BackColor = theme.Back;
+            ForeColor = theme.Text;
+            KeyPreview = true;
+            try { Icon = Icon.ExtractAssociatedIcon(Application.ExecutablePath); } catch { }
+
+            int iconSize = (int)Math.Round(16 * ScreenDpi() / 96.0);
+            icons = new IconCache(iconSize);
+            images.ImageSize = new Size(iconSize, iconSize);
+
+            BuildLayout();
+            refreshTimer.Tick += (s, e) => { if (IsCurrentPeriod()) RefreshData(); };
+            refreshTimer.Start();
+            Load += (s, e) =>
+            {
+                split.SplitterDistance = Math.Max(300, split.Width - 330);
+                if (InitialView > 0 && InitialView < 4) tabs[InitialView].Checked = true;   // RefreshData 호출됨
+                else RefreshData();
+                if (InitialSelect != null) SelectKey(InitialSelect);
+            };
+        }
+
+        int ScreenDpi()
+        {
+            using (var g = CreateGraphics()) return (int)g.DpiX;
+        }
+
+        // ---------- 배치 ----------
+
+        void BuildLayout()
+        {
+            var root = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 5, Padding = new Padding(12, 8, 12, 8), BackColor = theme.Back };
+            root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            root.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+            root.RowStyles.Add(new RowStyle(SizeType.Absolute, 200));
+            root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            Controls.Add(root);
+
+            // 1. 기간 탭과 이동
+            var top = new TableLayoutPanel { Dock = DockStyle.Fill, AutoSize = true, ColumnCount = 2, Margin = new Padding(0, 0, 0, 6) };
+            top.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+            top.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+            var tabBar = new FlowLayoutPanel { AutoSize = true, WrapContents = false, Margin = Padding.Empty };
+            string[] names = { "일", "주", "월", "년" };
+            for (int i = 0; i < 4; i++)
+            {
+                var rb = new RadioButton
+                {
+                    Text = names[i], Appearance = Appearance.Button, FlatStyle = FlatStyle.Flat, TextAlign = ContentAlignment.MiddleCenter,
+                    Size = new Size(52, 30), Margin = new Padding(0, 0, 4, 0), Tag = (Period)i, Checked = i == 0, Cursor = Cursors.Hand
+                };
+                rb.FlatAppearance.BorderColor = theme.Border;
+                rb.FlatAppearance.CheckedBackColor = theme.Accent;
+                rb.CheckedChanged += (s, e) =>
+                {
+                    var r = (RadioButton)s;
+                    r.ForeColor = r.Checked ? Color.White : theme.Text;
+                    if (r.Checked) { period = (Period)r.Tag; RefreshData(); }
+                };
+                rb.ForeColor = rb.Checked ? Color.White : theme.Text;
+                tabs[i] = rb;
+                tabBar.Controls.Add(rb);
+            }
+            top.Controls.Add(tabBar, 0, 0);
+
+            var nav = new FlowLayoutPanel { AutoSize = true, WrapContents = false, Anchor = AnchorStyles.Right, Margin = Padding.Empty };
+            foreach (var b in new[] { prevBtn, nextBtn, todayBtn })
+            {
+                b.FlatStyle = FlatStyle.Flat;
+                b.FlatAppearance.BorderColor = theme.Border;
+                b.Height = 30;
+                b.Cursor = Cursors.Hand;
+            }
+            prevBtn.Text = "◀"; prevBtn.Width = 36;
+            nextBtn.Text = "▶"; nextBtn.Width = 36;
+            todayBtn.Text = "오늘"; todayBtn.Width = 56; todayBtn.Margin = new Padding(8, 3, 0, 3);
+            periodLabel.AutoSize = true;
+            periodLabel.Font = boldFont;
+            periodLabel.Margin = new Padding(8, 9, 8, 0);
+            prevBtn.Click += (s, e) => MovePeriod(-1);
+            nextBtn.Click += (s, e) => MovePeriod(1);
+            todayBtn.Click += (s, e) => { anchor = DateTime.Today; RefreshData(); };
+            nav.Controls.AddRange(new Control[] { prevBtn, periodLabel, nextBtn, todayBtn });
+            top.Controls.Add(nav, 1, 0);
+            root.Controls.Add(top, 0, 0);
+
+            // 2. 타임라인
+            timeline.Dock = DockStyle.Fill;
+            timeline.Theme = theme;
+            timeline.Margin = new Padding(0, 0, 0, 6);
+            timeline.SegmentClicked += SelectKey;
+            timeline.ColorOf = k => theme.SlotColor(catalog.SlotOf(k));
+            root.Controls.Add(timeline, 0, 1);
+
+            // 3. 목록 + 상세
+            split.Dock = DockStyle.Fill;
+            split.FixedPanel = FixedPanel.Panel2;
+            split.BackColor = theme.Border;
+            split.Panel1.BackColor = theme.Back;
+            split.Panel2.BackColor = theme.Panel;
+            split.SplitterWidth = 1;
+            split.Margin = new Padding(0, 0, 0, 6);
+
+            list.Dock = DockStyle.Fill;
+            list.View = View.Details;
+            list.FullRowSelect = true;
+            list.HideSelection = false;
+            list.MultiSelect = false;
+            list.BorderStyle = BorderStyle.None;
+            list.SmallImageList = images;
+            list.BackColor = theme.Back;
+            list.ForeColor = theme.Text;
+            list.Columns.Add("이름", 300);
+            list.Columns.Add("활성 시간", 110, HorizontalAlignment.Right);
+            list.Columns.Add("실행 시간", 110, HorizontalAlignment.Right);
+            list.Columns.Add("비율", 70, HorizontalAlignment.Right);
+            list.ColumnClick += (s, e) => SortBy(e.Column);
+            list.SelectedIndexChanged += (s, e) => OnSelection();
+            list.Resize += (s, e) => FitNameColumn();
+            split.Panel1.Controls.Add(list);
+
+            detail.Dock = DockStyle.Fill;
+            detail.ColumnCount = 2;
+            detail.Padding = new Padding(16, 14, 12, 12);
+            detail.AutoScroll = true;
+            detail.BackColor = theme.Panel;
+            detail.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+            detail.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+            split.Panel2.Controls.Add(detail);
+            root.Controls.Add(split, 0, 2);
+
+            // 4. 시간대별 그래프
+            hourly.Dock = DockStyle.Fill;
+            hourly.Theme = theme;
+            hourly.Margin = new Padding(0, 0, 0, 4);
+            root.Controls.Add(hourly, 0, 3);
+
+            // 5. 요약
+            var bottom = new TableLayoutPanel { Dock = DockStyle.Fill, AutoSize = true, ColumnCount = 2, Margin = Padding.Empty };
+            bottom.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+            bottom.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+            summary.AutoSize = true;
+            summary.Margin = new Padding(0, 4, 0, 0);
+            status.AutoSize = true;
+            status.ForeColor = theme.Subtle;
+            status.Margin = new Padding(0, 4, 0, 0);
+            bottom.Controls.Add(summary, 0, 0);
+            bottom.Controls.Add(status, 1, 0);
+            root.Controls.Add(bottom, 0, 4);
+        }
+
+        void FitNameColumn()
+        {
+            if (list.Columns.Count < 4) return;
+            int others = list.Columns[1].Width + list.Columns[2].Width + list.Columns[3].Width;
+            int w = list.ClientSize.Width - others - 4;
+            if (w > 120) list.Columns[0].Width = w;
+        }
+
+        protected override void OnKeyDown(KeyEventArgs e)
+        {
+            if (e.KeyCode == Keys.F5) { RefreshData(); e.Handled = true; }
+            else if (e.Alt && e.KeyCode == Keys.Left) { MovePeriod(-1); e.Handled = true; }
+            else if (e.Alt && e.KeyCode == Keys.Right) { MovePeriod(1); e.Handled = true; }
+            base.OnKeyDown(e);
+        }
+
+        protected override void OnActivated(EventArgs e)
+        {
+            base.OnActivated(e);
+            if (sum != null && IsCurrentPeriod()) RefreshData();   // 다시 앞으로 올 때 최신으로
+        }
+
+        // ---------- 기간 ----------
+
+        void PeriodRange(out DateTime from, out DateTime to)
+        {
+            switch (period)
+            {
+                case Period.Week:
+                    int diff = ((int)anchor.DayOfWeek + 6) % 7;   // 월요일 시작
+                    from = anchor.Date.AddDays(-diff); to = from.AddDays(7); break;
+                case Period.Month:
+                    from = new DateTime(anchor.Year, anchor.Month, 1); to = from.AddMonths(1); break;
+                case Period.Year:
+                    from = new DateTime(anchor.Year, 1, 1); to = from.AddYears(1); break;
+                default:
+                    from = anchor.Date; to = from.AddDays(1); break;
+            }
+        }
+
+        bool IsCurrentPeriod()
+        {
+            DateTime from, to;
+            PeriodRange(out from, out to);
+            return DateTime.Now >= from && DateTime.Now < to;
+        }
+
+        void MovePeriod(int dir)
+        {
+            switch (period)
+            {
+                case Period.Week: anchor = anchor.AddDays(7 * dir); break;
+                case Period.Month: anchor = anchor.AddMonths(dir); break;
+                case Period.Year: anchor = anchor.AddYears(dir); break;
+                default: anchor = anchor.AddDays(dir); break;
+            }
+            if (anchor > DateTime.Today) anchor = DateTime.Today;
+            RefreshData();
+        }
+
+        string PeriodText(DateTime from, DateTime to)
+        {
+            var ko = CultureInfo.GetCultureInfo("ko-KR");
+            switch (period)
+            {
+                case Period.Week:
+                    var last = to.AddDays(-1);
+                    string end = last.Month == from.Month ? last.Day + "일" : last.Month + "월 " + last.Day + "일";
+                    return from.ToString("yyyy년 M월 d일", ko) + " – " + end;
+                case Period.Month: return from.ToString("yyyy년 M월", ko);
+                case Period.Year: return from.ToString("yyyy년", ko);
+                default:
+                    return from.ToString("yyyy년 M월 d일 (ddd)", ko) + (from == DateTime.Today ? " · 오늘" : "");
+            }
+        }
+
+        // ---------- 데이터 ----------
+
+        void RefreshData()
+        {
+            DateTime from, to;
+            PeriodRange(out from, out to);
+            periodLabel.Text = PeriodText(from, to);
+            nextBtn.Enabled = to <= DateTime.Today;
+            todayBtn.Enabled = !IsCurrentPeriod();
+
+            recorderAlive = Recorder.RequestFlush();
+            var now = DateTime.Now;
+            catalog = new AppCatalog(dataDir);
+            List<RawSeg> segs;
+            try { segs = UsageReader.Read(dataDir, from, to, now, recorderAlive); }
+            catch (Exception ex) { segs = new List<RawSeg>(); status.Text = "기록을 읽지 못했어요: " + ex.Message; }
+            sum = UsageReader.Summarize(segs, catalog.KeyOf, from, to);
+            sumRaw = UsageReader.Summarize(segs, id => id, from, to);
+
+            // 행 만들기 (숨긴 항목 제외)
+            var keys = new HashSet<string>(sum.Active.Keys, StringComparer.OrdinalIgnoreCase);
+            keys.UnionWith(sum.Running.Keys);
+            double total = 0;
+            rows = new List<Row>();
+            foreach (var k in keys)
+            {
+                if (catalog.IsHidden(k)) continue;
+                double a, r;
+                sum.Active.TryGetValue(k, out a);
+                sum.Running.TryGetValue(k, out r);
+                rows.Add(new Row { Key = k, Name = catalog.DisplayName(k), Active = a, Running = r });
+                total += a;
+            }
+            foreach (var row in rows) row.Ratio = total > 0 ? row.Active / total : 0;
+
+            string selected = SelectedKey();
+            Populate(selected);
+
+            bool isDay = period == Period.Day;
+            timeline.Visible = isDay;
+            if (isDay) timeline.SetData(from, sum.ActiveSegments.Where(s => !catalog.IsHidden(s.AppId)).ToList(), k => catalog.DisplayName(k));
+
+            summary.Text = "PC 켜짐 " + Fmt.Short(sum.PcOn) + "   ·   실제 사용 " + Fmt.Short(sum.PcUsed)
+                + "   ·   앱 활성 합계 " + Fmt.Short(total) + "   ·   앱 " + rows.Count + "개";
+            if (!status.Text.StartsWith("기록을"))
+                status.Text = recorderAlive ? "기록 중 · " + now.ToString("HH:mm") + " 기준" : "기록 프로그램이 꺼져 있어요";
+            OnSelection();
+        }
+
+        void Populate(string keepKey)
+        {
+            Comparison<Row> cmp;
+            switch (sortCol)
+            {
+                case 0: cmp = (a, b) => string.Compare(a.Name, b.Name, StringComparison.CurrentCultureIgnoreCase); break;
+                case 2: cmp = (a, b) => a.Running.CompareTo(b.Running); break;
+                case 3: cmp = (a, b) => a.Ratio.CompareTo(b.Ratio); break;
+                default: cmp = (a, b) => a.Active.CompareTo(b.Active); break;
+            }
+            rows.Sort((a, b) =>
+            {
+                int c = sortAsc ? cmp(a, b) : cmp(b, a);
+                return c != 0 ? c : string.Compare(a.Name, b.Name, StringComparison.CurrentCultureIgnoreCase);
+            });
+
+            list.BeginUpdate();
+            list.Items.Clear();
+            foreach (var r in rows)
+            {
+                if (!images.Images.ContainsKey(r.Key))
+                    images.Images.Add(r.Key, icons.Get(r.Key, PathOf(r.Key)));
+                var item = new ListViewItem(r.Name, r.Key) { Tag = r };
+                item.SubItems.Add(r.Active > 0 ? Fmt.Short(r.Active) : "–");
+                item.SubItems.Add(r.Running > 0 ? Fmt.Short(r.Running) : "–");
+                item.SubItems.Add(r.Active > 0 ? Fmt.Pct(r.Ratio) : "–");
+                list.Items.Add(item);
+                if (keepKey != null && string.Equals(keepKey, r.Key, StringComparison.OrdinalIgnoreCase)) item.Selected = true;
+            }
+            list.EndUpdate();
+            SortArrow.Set(list, sortCol, sortAsc);
+            FitNameColumn();
+        }
+
+        void SortBy(int col)
+        {
+            if (col == sortCol) sortAsc = !sortAsc;
+            else { sortCol = col; sortAsc = col == 0; }   // 이름은 가나다순, 시간은 큰 것부터
+            Populate(SelectedKey());
+        }
+
+        string SelectedKey()
+        {
+            return list.SelectedItems.Count > 0 ? ((Row)list.SelectedItems[0].Tag).Key : null;
+        }
+
+        void SelectKey(string key)
+        {
+            foreach (ListViewItem item in list.Items)
+            {
+                bool match = string.Equals(((Row)item.Tag).Key, key, StringComparison.OrdinalIgnoreCase);
+                item.Selected = match;
+                if (match) { item.EnsureVisible(); item.Focused = true; }
+            }
+            list.Focus();
+        }
+
+        string PathOf(string key)
+        {
+            if (AppCatalog.IsGroup(key))
+            {
+                var m = catalog.Members(key);
+                return m.Count > 0 ? PathOf(m[0]) : null;
+            }
+            AppInfo a;
+            return catalog.Info.TryGetValue(key, out a) ? a.Path : null;
+        }
+
+        // ---------- 선택 → 상세·그래프·타임라인 ----------
+
+        void OnSelection()
+        {
+            if (sum == null) return;
+            string key = SelectedKey();
+            timeline.Selected = key;
+            timeline.Invalidate();
+
+            if (key == null)
+                hourly.SetData(sum.HourlyAll, "시간대별 활성 시간 · 전체" + (period == Period.Day ? "" : " (기간 합계)"), Color.Empty);
+            else
+            {
+                double[] h;
+                sum.HourlyActive.TryGetValue(key, out h);
+                hourly.SetData(h, "시간대별 활성 시간 · " + catalog.DisplayName(key) + (period == Period.Day ? "" : " (기간 합계)"), theme.SlotColor(catalog.SlotOf(key)));
+            }
+            ShowDetail(key);
+        }
+
+        void ShowDetail(string key)
+        {
+            detail.SuspendLayout();
+            foreach (Control c in detail.Controls) c.Dispose();
+            detail.Controls.Clear();
+            detail.RowStyles.Clear();
+            detail.RowCount = 0;
+
+            if (key == null)
+            {
+                AddTitle(null, "기간 요약");
+                AddField("앱", rows.Count + "개");
+                AddField("앱 활성 합계", Fmt.Long(rows.Sum(r => r.Active)));
+                AddField("PC 켜짐", Fmt.Long(sum.PcOn));
+                AddField("실제 사용", Fmt.Long(sum.PcUsed));
+                AddNote("목록에서 앱을 고르면 자세한 정보와 시간대별 사용이 보여요.");
+            }
+            else
+            {
+                var row = rows.FirstOrDefault(r => string.Equals(r.Key, key, StringComparison.OrdinalIgnoreCase));
+                bool group = AppCatalog.IsGroup(key);
+                var ids = group ? catalog.Members(key) : new List<string> { key };
+
+                AddTitle(icons.Get(key, PathOf(key)), catalog.DisplayName(key));
+                AddField("원래 이름", group ? "묶음 (" + ids.Count + "개 앱)" : catalog.OriginalName(key));
+                if (row != null)
+                {
+                    AddField("이 기간 활성", Fmt.Long(row.Active));
+                    AddField("이 기간 실행", row.Running > 0 ? Fmt.Long(row.Running) : "–");
+                    AddField("비율", row.Active > 0 ? Fmt.Pct(row.Ratio) : "–");
+                }
+
+                DateTime first = DateTime.MaxValue;
+                foreach (var id in ids) { AppInfo a; if (catalog.Info.TryGetValue(id, out a) && a.FirstSeen > DateTime.MinValue && a.FirstSeen < first) first = a.FirstSeen; }
+                if (first < DateTime.MaxValue) AddField("처음 기록", first.ToString("yyyy-MM-dd HH:mm"));
+                var last = UsageReader.LastUsed(dataDir, ids, DateTime.Now);
+                AddField("마지막 사용", last == null ? "–" : (last.Value >= DateTime.Now.AddMinutes(-1) ? "지금 사용 중" : last.Value.ToString("yyyy-MM-dd HH:mm")));
+
+                if (group)
+                {
+                    AddHeader("묶인 앱");
+                    foreach (var id in ids)
+                    {
+                        double a; sumRaw.Active.TryGetValue(id, out a);
+                        AddField(catalog.OriginalName(id), Fmt.Long(a));
+                    }
+                }
+                else
+                {
+                    string path = PathOf(key);
+                    if (!string.IsNullOrEmpty(path))
+                    {
+                        AddField("실행 파일", path);
+                        if (File.Exists(path))
+                        {
+                            var link = new LinkLabel { Text = "파일 위치 열기", AutoSize = true, Margin = new Padding(0, 2, 0, 8), LinkColor = theme.Accent };
+                            link.LinkClicked += (s, e) => { try { Process.Start("explorer.exe", "/select,\"" + path + "\""); } catch { } };
+                            AddRow(new Label(), link);
+                        }
+                    }
+                    else if (key == AppResolver.DesktopId) AddNote("바탕화면이 맨 앞에 있던 시간이에요.");
+                }
+            }
+            detail.ResumeLayout();
+        }
+
+        void AddRow(Control left, Control right)
+        {
+            detail.RowCount++;
+            detail.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            detail.Controls.Add(left, 0, detail.RowCount - 1);
+            if (right != null) detail.Controls.Add(right, 1, detail.RowCount - 1);
+            else detail.SetColumnSpan(left, 2);
+        }
+
+        void AddTitle(Image icon, string text)
+        {
+            var panel = new FlowLayoutPanel { AutoSize = true, WrapContents = false, Margin = new Padding(0, 0, 0, 12) };
+            if (icon != null) panel.Controls.Add(new PictureBox { Image = icon, SizeMode = PictureBoxSizeMode.Zoom, Size = new Size(24, 24), Margin = new Padding(0, 4, 8, 0) });
+            panel.Controls.Add(new Label { Text = text, Font = titleFont, AutoSize = true, ForeColor = theme.Text, MaximumSize = new Size(260, 0) });
+            AddRow(panel, null);
+        }
+
+        void AddField(string name, string value)
+        {
+            var l = new Label { Text = name, AutoSize = true, ForeColor = theme.Subtle, Margin = new Padding(0, 3, 12, 3) };
+            var v = new Label { Text = value, AutoSize = true, ForeColor = theme.Text, Margin = new Padding(0, 3, 0, 3), MaximumSize = new Size(200, 0) };
+            AddRow(l, v);
+        }
+
+        void AddHeader(string text)
+        {
+            AddRow(new Label { Text = text, AutoSize = true, Font = boldFont, ForeColor = theme.Text, Margin = new Padding(0, 12, 0, 4) }, null);
+        }
+
+        void AddNote(string text)
+        {
+            AddRow(new Label { Text = text, AutoSize = true, ForeColor = theme.Subtle, Margin = new Padding(0, 12, 0, 0), MaximumSize = new Size(280, 0) }, null);
+        }
+    }
+
+    /// <summary>기록 모드(같은 exe의 상주 프로세스)와의 연락.</summary>
+    static class Recorder
+    {
+        [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern IntPtr FindWindow(string cls, string title);
+        [DllImport("user32.dll")]
+        static extern IntPtr SendMessageTimeout(IntPtr h, uint msg, IntPtr w, IntPtr l, uint flags, uint timeout, out IntPtr result);
+
+        /// <summary>기록 모드에 지금까지의 기록을 저장하라고 요청한다. 기록 모드가 실행 중이면 true.</summary>
+        public static bool RequestFlush()
+        {
+            IntPtr h = FindWindow("UsageTracker.Recorder", null);
+            if (h == IntPtr.Zero) return false;
+            IntPtr r;
+            SendMessageTimeout(h, 0x0111 /*WM_COMMAND*/, (IntPtr)Tray.CmdFlush, IntPtr.Zero, 0x2 /*SMTO_ABORTIFHUNG*/, 2000, out r);
+            return true;
+        }
+    }
+}

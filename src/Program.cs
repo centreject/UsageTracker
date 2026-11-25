@@ -8,7 +8,7 @@ namespace UsageTracker
 {
     /// <summary>
     /// 진입점. 기본은 기록 모드(트레이 상주). 옵션:
-    ///   --ui              화면 모드 (4단계에서 구현)
+    ///   --ui              화면 모드 (통계 창). 트레이 더블클릭·"열기"가 이것으로 실행한다
     ///   --data=폴더       데이터 폴더 지정 (개발·시험용. 지정하면 자동 시작을 건드리지 않는다)
     ///   --tick=초 --flush=초 --idle=초   주기·자리 비움 기준을 바꾼다 (시험용)
     /// </summary>
@@ -36,15 +36,16 @@ namespace UsageTracker
             string dataDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "UsageTracker");
             manageAutoStart = true;
             int idleSecOverride = -1;
+            bool ui = false;
             foreach (var a in args)
             {
-                if (a == "--ui") return ShowNotReady();
-                if (a.StartsWith("--bench="))
+                if (a == "--ui") ui = true;
+                else if (a.StartsWith("--bench="))
                 {
                     SelfTest.Bench(a.Substring(8));
                     return 0;
                 }
-                if (a.StartsWith("--selftest"))
+                else if (a.StartsWith("--selftest"))
                 {
                     string report = a.StartsWith("--selftest=") ? a.Substring(11)
                         : Path.Combine(Path.GetTempPath(), "UsageTracker-selftest.txt");
@@ -54,6 +55,15 @@ namespace UsageTracker
                 else if (a.StartsWith("--tick=")) tickMs = (uint)Math.Max(1, int.Parse(a.Substring(7))) * 1000;
                 else if (a.StartsWith("--flush=")) flushMs = (uint)Math.Max(1, int.Parse(a.Substring(8))) * 1000;
                 else if (a.StartsWith("--idle=")) idleSecOverride = Math.Max(0, int.Parse(a.Substring(7)));   // 0 = 자리 비움 판정 끔 (시험용)
+            }
+            Program.dataDir = dataDir;
+
+            if (ui)
+            {
+                // 화면 모드: WinForms는 이 경로에서만 불러온다 (기록 모드 메모리에 영향 없음)
+                Directory.CreateDirectory(dataDir);
+                ErrorLog.Init(dataDir);
+                return RunUi(dataDir, args);
             }
 
             bool created;
@@ -107,14 +117,21 @@ namespace UsageTracker
             return 0;
         }
 
-        static int ShowNotReady()
+        static string dataDir;
+
+        // 별도 메서드로 둬서, 기록 모드에서는 화면 모드 코드(WinForms)를 JIT하지도 불러오지도 않게 한다
+        [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+        static int RunUi(string dir, string[] args)
         {
-            MessageBox(IntPtr.Zero, "화면 모드는 아직 준비 중입니다 (4단계).", "사용 시간 기록", 0x40);
-            return 0;
+            return Ui.UiApp.Run(dir, args);
         }
 
-        [DllImport("user32.dll", CharSet = CharSet.Unicode)]
-        static extern int MessageBox(IntPtr hwnd, string text, string caption, uint type);
+        /// <summary>트레이에서 화면 모드를 연다 (같은 exe를 --ui로 실행).</summary>
+        static void LaunchUi()
+        {
+            string args = "--ui" + (manageAutoStart ? "" : " \"--data=" + dataDir + "\"");
+            Native.ShellExecute(IntPtr.Zero, "open", exePath, args, null, 1);
+        }
 
         static void CreateWindow()
         {
@@ -162,7 +179,7 @@ namespace UsageTracker
                     case Tray.CallbackMessage:
                         int ev = lParam.ToInt32() & 0xFFFF;
                         if (ev == Native.WM_RBUTTONUP) { OnMenu(); UpdateTip(); }
-                        else if (ev == Native.WM_LBUTTONDBLCLK) ShowNotReady();
+                        else if (ev == Native.WM_LBUTTONDBLCLK) LaunchUi();
                         return IntPtr.Zero;
 
                     case Native.WM_WTSSESSION_CHANGE:
@@ -275,6 +292,9 @@ namespace UsageTracker
                 case Tray.CmdErrors:
                     if (ErrorLog.FilePath != null && File.Exists(ErrorLog.FilePath))
                         Native.ShellExecute(IntPtr.Zero, "open", "notepad.exe", "\"" + ErrorLog.FilePath + "\"", null, 1);
+                    break;
+                case Tray.CmdOpen:
+                    LaunchUi();
                     break;
                 case Tray.CmdFlush:
                     tracker.Flush();

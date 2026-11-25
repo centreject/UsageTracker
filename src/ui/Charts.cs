@@ -1,0 +1,279 @@
+using System;
+using System.Collections.Generic;
+using System.Drawing;
+using System.Drawing.Drawing2D;
+using System.Windows.Forms;
+
+namespace UsageTracker.Ui
+{
+    /// <summary>
+    /// 하루 0–24시 활성 앱 타임라인 띠. 앱마다 고정 색, 선택한 앱 외에는 흐리게.
+    /// 마우스를 올리면 앱·시각, 누르면 그 앱을 선택한다. 아래에 상위 앱 범례.
+    /// </summary>
+    sealed class TimelineControl : Control
+    {
+        List<RawSeg> segs = new List<RawSeg>();
+        DateTime day;
+        Func<string, string> nameOf = k => k;
+        readonly ToolTip tip = new ToolTip { InitialDelay = 0, ReshowDelay = 0, AutoPopDelay = 10000 };
+        string lastTip;
+        public Theme Theme = Theme.Light();
+        public Func<string, Color> ColorOf = k => Color.Gray;
+        public string Selected;
+        public event Action<string> SegmentClicked;
+
+        const int PadX = 12, BarTop = 6, BarH = 22, AxisH = 16, LegendH = 18;
+
+        public TimelineControl()
+        {
+            SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.UserPaint | ControlStyles.ResizeRedraw, true);
+            Height = BarTop + BarH + AxisH + LegendH + 6;
+        }
+
+        public void SetData(DateTime day, List<RawSeg> active, Func<string, string> nameOf)
+        {
+            this.day = day.Date;
+            segs = active;
+            this.nameOf = nameOf;
+            Invalidate();
+        }
+
+        float X(DateTime t)
+        {
+            double frac = (t - day).TotalSeconds / 86400.0;
+            return PadX + (float)(frac * (Width - PadX * 2));
+        }
+
+        protected override void OnPaint(PaintEventArgs e)
+        {
+            var g = e.Graphics;
+            g.Clear(Theme.Back);
+            g.SmoothingMode = SmoothingMode.AntiAlias;
+            var track = new RectangleF(PadX, BarTop, Width - PadX * 2, BarH);
+            using (var b = new SolidBrush(Theme.Track)) FillRounded(g, b, track, 4);
+
+            // 3시간마다 눈금 (옅게)
+            using (var pen = new Pen(Theme.Grid))
+            using (var tb = new SolidBrush(Theme.Subtle))
+            {
+                for (int h = 0; h <= 24; h += 3)
+                {
+                    float x = PadX + h / 24f * (Width - PadX * 2);
+                    g.DrawLine(pen, x, BarTop + BarH, x, BarTop + BarH + 3);
+                    string s = h.ToString("00");
+                    var sz = g.MeasureString(s, Font);
+                    g.DrawString(s, Font, tb, Math.Max(0, Math.Min(Width - sz.Width, x - sz.Width / 2)), BarTop + BarH + 2);
+                }
+            }
+
+            g.SmoothingMode = SmoothingMode.None;
+            foreach (var s in segs)
+            {
+                float x1 = X(s.Start), x2 = Math.Max(X(s.End), x1 + 1);
+                var c = ColorOf(s.AppId);
+                if (Selected != null && !string.Equals(Selected, s.AppId, StringComparison.OrdinalIgnoreCase))
+                    c = Color.FromArgb(55, c);
+                using (var b = new SolidBrush(c)) g.FillRectangle(b, x1, BarTop + 2, x2 - x1, BarH - 4);
+            }
+
+            // 범례: 이 날 활성 시간 상위 6개 앱
+            var totals = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase);
+            foreach (var s in segs) { double v; totals.TryGetValue(s.AppId, out v); totals[s.AppId] = v + s.Seconds; }
+            var top = new List<KeyValuePair<string, double>>(totals);
+            top.Sort((a, b) => b.Value.CompareTo(a.Value));
+            float lx = PadX, ly = BarTop + BarH + AxisH + 2;
+            using (var tb = new SolidBrush(Theme.Subtle))
+            {
+                for (int i = 0; i < top.Count && i < 6; i++)
+                {
+                    string label = nameOf(top[i].Key);
+                    var sz = g.MeasureString(label, Font);
+                    if (lx + 14 + sz.Width > Width - PadX) break;
+                    using (var b = new SolidBrush(ColorOf(top[i].Key))) g.FillRectangle(b, lx, ly + 4, 10, 10);
+                    g.DrawString(label, Font, tb, lx + 13, ly + 1);
+                    lx += 13 + sz.Width + 12;
+                }
+                if (top.Count == 0) g.DrawString("이 날은 기록이 없어요", Font, tb, PadX, ly + 1);
+            }
+        }
+
+        RawSeg Hit(Point p)
+        {
+            if (p.Y < BarTop - 4 || p.Y > BarTop + BarH + 4) return null;
+            RawSeg best = null;
+            foreach (var s in segs)
+            {
+                float x1 = X(s.Start) - 2, x2 = Math.Max(X(s.End), x1 + 3) + 2;   // 얇은 구간도 잡히게 여유
+                if (p.X >= x1 && p.X <= x2) { best = s; if (p.X >= x1 + 2 && p.X <= x2 - 2) break; }
+            }
+            return best;
+        }
+
+        protected override void OnMouseMove(MouseEventArgs e)
+        {
+            var s = Hit(e.Location);
+            string text = s == null ? null
+                : nameOf(s.AppId) + "\n" + Fmt.Clock(s.Start) + "–" + Fmt.Clock(s.End) + " (" + Fmt.Long(s.Seconds) + ")";
+            if (text != lastTip)
+            {
+                lastTip = text;
+                if (text == null) tip.Hide(this); else tip.Show(text, this, e.X + 12, e.Y + 16);
+            }
+            Cursor = s == null ? Cursors.Default : Cursors.Hand;
+        }
+
+        protected override void OnMouseLeave(EventArgs e) { lastTip = null; tip.Hide(this); }
+
+        protected override void OnMouseClick(MouseEventArgs e)
+        {
+            var s = Hit(e.Location);
+            if (s != null && SegmentClicked != null) SegmentClicked(s.AppId);
+        }
+
+        public static void FillRounded(Graphics g, Brush b, RectangleF r, float radius)
+        {
+            using (var path = new GraphicsPath())
+            {
+                float d = radius * 2;
+                path.AddArc(r.X, r.Y, d, d, 180, 90);
+                path.AddArc(r.Right - d, r.Y, d, d, 270, 90);
+                path.AddArc(r.Right - d, r.Bottom - d, d, d, 0, 90);
+                path.AddArc(r.X, r.Bottom - d, d, d, 90, 90);
+                path.CloseFigure();
+                g.FillPath(b, path);
+            }
+        }
+    }
+
+    /// <summary>시간대별(0–23시) 활성 시간 막대그래프. 한 계열(전체 또는 선택한 앱)만 그린다.</summary>
+    sealed class HourlyChart : Control
+    {
+        double[] values = new double[24];
+        readonly ToolTip tip = new ToolTip { InitialDelay = 0, ReshowDelay = 0, AutoPopDelay = 10000 };
+        int lastHour = -1;
+        public Theme Theme = Theme.Light();
+        public Color BarColor = Color.Empty;
+        public string Caption = "";
+
+        const int PadL = 52, PadR = 12, PadT = 26, PadB = 20;
+
+        public HourlyChart()
+        {
+            SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.UserPaint | ControlStyles.ResizeRedraw, true);
+        }
+
+        public void SetData(double[] hourly, string caption, Color color)
+        {
+            values = hourly ?? new double[24];
+            Caption = caption;
+            BarColor = color;
+            Invalidate();
+        }
+
+        /// <summary>눈금 간격: 최대값을 넘는 보기 좋은 값 (분 단위 또는 시간 단위).</summary>
+        static double NiceMax(double max, out double step)
+        {
+            double[] steps = { 60, 300, 600, 900, 1800, 3600, 7200, 3 * 3600, 6 * 3600, 12 * 3600, 24 * 3600, 48 * 3600, 96 * 3600, 240 * 3600 };
+            foreach (var s in steps)
+                if (max <= s * 4) { step = s; return Math.Max(s, Math.Ceiling(max / s) * s); }
+            step = Math.Ceiling(max / 4 / 3600) * 3600;
+            return step * 4;
+        }
+
+        static string AxisLabel(double sec)
+        {
+            if (sec == 0) return "0";
+            if (sec % 3600 == 0) return (sec / 3600) + "시간";
+            return (sec / 60) + "분";
+        }
+
+        RectangleF Plot { get { return new RectangleF(PadL, PadT, Width - PadL - PadR, Height - PadT - PadB); } }
+
+        protected override void OnPaint(PaintEventArgs e)
+        {
+            var g = e.Graphics;
+            g.Clear(Theme.Back);
+            var plot = Plot;
+            double max = 0;
+            foreach (var v in values) max = Math.Max(max, v);
+            double step;
+            double top = NiceMax(Math.Max(max, 1), out step);
+
+            using (var tb = new SolidBrush(Theme.Text))
+            using (var bold = new Font(Font, FontStyle.Bold))
+                g.DrawString(Caption, bold, tb, PadL - 4, 4);
+
+            // 옅은 가로 눈금선
+            using (var grid = new Pen(Theme.Grid))
+            using (var mb = new SolidBrush(Theme.Subtle))
+            {
+                for (double v = 0; v <= top + 0.1; v += step)
+                {
+                    float y = plot.Bottom - (float)(v / top * plot.Height);
+                    g.DrawLine(grid, plot.Left, y, plot.Right, y);
+                    string s = AxisLabel(v);
+                    var sz = g.MeasureString(s, Font);
+                    g.DrawString(s, Font, mb, plot.Left - sz.Width - 4, y - sz.Height / 2);
+                }
+                float bw = plot.Width / 24f;
+                for (int h = 0; h < 24; h += 3)
+                {
+                    string s = h + "시";
+                    var sz = g.MeasureString(s, Font);
+                    g.DrawString(s, Font, mb, plot.Left + bw * h + bw / 2 - sz.Width / 2, plot.Bottom + 2);
+                }
+            }
+
+            // 막대: 2px 간격, 위쪽만 둥글게
+            g.SmoothingMode = SmoothingMode.AntiAlias;
+            float w = plot.Width / 24f;
+            using (var b = new SolidBrush(BarColor.IsEmpty ? Theme.Accent : BarColor))
+            {
+                for (int h = 0; h < 24; h++)
+                {
+                    if (values[h] <= 0) continue;
+                    float bh = Math.Max(2, (float)(values[h] / top * plot.Height));
+                    var r = new RectangleF(plot.Left + w * h + 1, plot.Bottom - bh, w - 2, bh);
+                    FillTopRounded(g, b, r, Math.Min(4, Math.Min(r.Width / 2, r.Height)));
+                    if (h == lastHour)
+                        using (var hl = new SolidBrush(Color.FromArgb(40, Theme.Text))) g.FillRectangle(hl, r);
+                }
+            }
+            if (max <= 0)
+                using (var mb = new SolidBrush(Theme.Subtle))
+                    g.DrawString("이 기간에는 활성 시간이 없어요", Font, mb, plot.Left + 8, plot.Top + plot.Height / 2 - 8);
+        }
+
+        static void FillTopRounded(Graphics g, Brush b, RectangleF r, float radius)
+        {
+            if (radius < 1) { g.FillRectangle(b, r); return; }
+            using (var path = new GraphicsPath())
+            {
+                float d = radius * 2;
+                path.AddArc(r.X, r.Y, d, d, 180, 90);
+                path.AddArc(r.Right - d, r.Y, d, d, 270, 90);
+                path.AddLine(r.Right, r.Y + radius, r.Right, r.Bottom);
+                path.AddLine(r.Right, r.Bottom, r.X, r.Bottom);
+                path.CloseFigure();
+                g.FillPath(b, path);
+            }
+        }
+
+        protected override void OnMouseMove(MouseEventArgs e)
+        {
+            var plot = Plot;
+            int h = -1;
+            if (e.X >= plot.Left && e.X < plot.Right && e.Y >= plot.Top - 4 && e.Y <= plot.Bottom)
+                h = Math.Min(23, (int)((e.X - plot.Left) / (plot.Width / 24f)));
+            if (h != lastHour)
+            {
+                lastHour = h;
+                if (h < 0) tip.Hide(this);
+                else tip.Show(h + "시–" + (h + 1) + "시\n" + Fmt.Long(values[h]), this, e.X + 12, e.Y + 16);
+                Invalidate();
+            }
+        }
+
+        protected override void OnMouseLeave(EventArgs e) { lastHour = -1; tip.Hide(this); Invalidate(); }
+    }
+}

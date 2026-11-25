@@ -162,6 +162,35 @@ namespace UsageTracker
             }
         }
 
+        /// <summary>앱(들)이 마지막으로 활성이었던 시각. 지금 활성 중이면 now. 최근 24개월만 찾는다.</summary>
+        public static DateTime? LastUsed(string dir, ICollection<string> ids, DateTime now)
+        {
+            var set = new HashSet<string>(ids, StringComparer.OrdinalIgnoreCase);
+            var month = new DateTime(now.Year, now.Month, 1);
+            for (int i = 0; i < 24; i++, month = month.AddMonths(-1))
+            {
+                string f = SessionWriter.FileFor(dir, month);
+                if (!File.Exists(f)) continue;
+                DateTime best = DateTime.MinValue;
+                var open = new HashSet<string>(StringComparer.Ordinal);
+                foreach (var line in ReadLinesShared(f))
+                {
+                    var p = line.Split('\t');
+                    DateTime e;
+                    if (p.Length == 4 && p[0] == "A" && set.Contains(p[3]) && SessionWriter.TryParse(p[2], out e))
+                    {
+                        if (e > best) best = e;
+                        open.Remove(p[1] + "|" + p[3]);
+                    }
+                    else if (p.Length == 4 && p[0] == "O" && p[1] == "A" && set.Contains(p[3]))
+                        open.Add(p[2] + "|" + p[3]);
+                }
+                if (open.Count > 0 && i == 0) return now;
+                if (best > DateTime.MinValue) return best;
+            }
+            return null;
+        }
+
         public static double UnionSeconds(List<RawSeg> list)
         {
             if (list.Count == 0) return 0;

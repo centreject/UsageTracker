@@ -80,6 +80,25 @@ namespace UsageTracker
             AppEntry e; return apps.TryGetValue(key, out e) && e.Hidden;
         }
 
+        /// <summary>색 슬롯: appinfo.tsv에 처음 기록된 순서 (묶음은 가장 먼저 기록된 멤버).</summary>
+        public int SlotOf(string key)
+        {
+            if (slots == null)
+            {
+                slots = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+                foreach (var id in Info.Keys) slots[id] = slots.Count;
+            }
+            if (IsGroup(key))
+            {
+                int best = int.MaxValue;
+                foreach (var m in Members(key)) { int s; if (slots.TryGetValue(m, out s) && s < best) best = s; }
+                return best == int.MaxValue ? 0 : best;
+            }
+            int v;
+            return slots.TryGetValue(key, out v) ? v : Math.Abs(key.GetHashCode());
+        }
+        Dictionary<string, int> slots;
+
         public List<string> Members(string groupKey)
         {
             var list = new List<string>();

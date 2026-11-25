@@ -60,7 +60,7 @@ namespace UsageTracker
             {
                 Native.AppendMenu(menu, Native.MF_STRING | Native.MF_GRAYED, UIntPtr.Zero, status);
                 Native.AppendMenu(menu, Native.MF_SEPARATOR, UIntPtr.Zero, null);
-                Native.AppendMenu(menu, Native.MF_STRING | Native.MF_GRAYED, (UIntPtr)CmdOpen, "열기 (준비 중)");
+                Native.AppendMenu(menu, Native.MF_STRING, (UIntPtr)CmdOpen, "열기");
 
                 if (paused)
                 {

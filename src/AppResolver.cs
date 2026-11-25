@@ -37,6 +37,8 @@ namespace UsageTracker
         };
 
         readonly uint ownPid = (uint)Native.GetCurrentProcessId();
+        // 화면 모드는 같은 exe의 다른 프로세스이므로 pid가 아니라 exe 경로로 뺀다
+        readonly string ownExe = System.Reflection.Assembly.GetExecutingAssembly().Location;
         readonly Dictionary<string, AppInfo> known;                       // ID → 정보 (appinfo.tsv)
         readonly Dictionary<string, AppInfo> byPath = new Dictionary<string, AppInfo>(StringComparer.OrdinalIgnoreCase);
         readonly List<AppInfo> newApps = new List<AppInfo>();
@@ -66,7 +68,7 @@ namespace UsageTracker
             if (cls == "Progman" || cls == "WorkerW") return Desktop();
 
             string path = PathOf(pid, hwnd, cls);
-            if (path == null) return null;
+            if (path == null || IsSelf(path)) return null;
             string exe = System.IO.Path.GetFileName(path);
             if (ShellExes.Contains(exe)) return null;
             if (exe.Equals("explorer.exe", StringComparison.OrdinalIgnoreCase) && ExplorerShellClasses.Contains(cls)) return null;
@@ -83,10 +85,15 @@ namespace UsageTracker
                 path = ProcessPath(pid);
                 pathCache[pid] = path;
             }
-            if (path == null) return null;
+            if (path == null || IsSelf(path)) return null;
             string exe = System.IO.Path.GetFileName(path);
             if (ShellExes.Contains(exe) || exe.Equals("explorer.exe", StringComparison.OrdinalIgnoreCase)) return null;
             return Register(path);
+        }
+
+        bool IsSelf(string path)
+        {
+            return string.Equals(path, ownExe, StringComparison.OrdinalIgnoreCase);
         }
 
         string Desktop()
