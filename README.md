@@ -4,7 +4,7 @@ Windows 데스크탑용 프로그램 사용 시간 기록 앱. 백그라운드�
 
 ## 상태
 
-기능 완성 — 5단계(목록 관리·설정·다크 모드)까지 완료. 남은 일은 6단계(빌드·검증, 24시간 연속 실행 측정)다. 트레이 아이콘을 더블클릭하면 통계 창이 열린다. 변경 내용은 [CHANGELOG.md](CHANGELOG.md), 사람이 확인할 항목은 [docs/manual-tests.md](docs/manual-tests.md) 참고.
+기능 완성, 최종 검증 중 — 24시간 연속 실행 측정(`tools/monitor.ps1`, `tools/monitor-report.ps1`)이 끝나면 1.0.0으로 낸다. 트레이 아이콘을 더블클릭하면 통계 창이 열린다. 변경 내용은 [CHANGELOG.md](CHANGELOG.md), 사람이 확인할 항목은 [docs/manual-tests.md](docs/manual-tests.md) 참고.
 
 ## 시험
 
@@ -13,7 +13,15 @@ Windows 데스크탑용 프로그램 사용 시간 기록 앱. 백그라운드�
 .\tools\test-events.ps1   # 실제 실행 + 일시정지·절전·잠금·시각 변경 메시지
 ```
 
-## 주요 기능 (계획)
+## 설치
+
+1. [Releases](https://github.com/centreject/UsageTracker/releases)에서 `UsageTracker-v*.zip`을 받아 원하는 폴더에 푼다. 서명하지 않은 exe라 처음 실행할 때 Windows SmartScreen 경고가 나올 수 있다 ("추가 정보" → "실행").
+2. `UsageTracker.exe`를 실행하면 트레이에 상주하고, Windows 시작 시 자동 실행으로 등록된다 (트레이 메뉴·설정에서 끌 수 있다).
+3. 지울 때는 설정 → "제거 준비"를 누른 뒤 프로그램 폴더를 지운다.
+
+소스에서 설치하려면 `.\tools\install.ps1`을 실행한다 (`%LOCALAPPDATA%\Programs\UsageTracker`에 복사 후 실행).
+
+## 주요 기능
 
 - 파일명이 아닌 알아볼 수 있는 이름으로 표시 (예: `chrome.exe` → Google Chrome), 사용자가 이름 변경 가능
 - 활성 시간(맨 앞 창)과 실행 시간(켜져 있던 시간)을 일·주·월·년 단위로 조회, 정렬
