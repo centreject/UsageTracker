@@ -116,19 +116,89 @@ namespace UsageTracker
             return a.Id;
         }
 
+        /// <summary>
+        /// 원래 이름: 스토어(패키지) 앱은 매니페스트의 표시 이름(현지화) → FileDescription → ProductName → exe 파일명.
+        /// FileDescription이 "Notepad.exe"처럼 파일명 모양이면 건너뛴다.
+        /// </summary>
         static string ReadName(string path)
         {
             try
             {
+                string pkg = PackagedAppName(path);
+                if (!string.IsNullOrWhiteSpace(pkg)) return pkg.Trim();
                 if (File.Exists(path))
                 {
                     var vi = FileVersionInfo.GetVersionInfo(path);
-                    if (!string.IsNullOrWhiteSpace(vi.FileDescription)) return vi.FileDescription.Trim();
+                    string d = vi.FileDescription;
+                    if (!string.IsNullOrWhiteSpace(d) && !d.Trim().EndsWith(".exe", StringComparison.OrdinalIgnoreCase)) return d.Trim();
                     if (!string.IsNullOrWhiteSpace(vi.ProductName)) return vi.ProductName.Trim();
                 }
             }
             catch { }
             return System.IO.Path.GetFileName(path);
+        }
+
+        /// <summary>WindowsApps 아래 패키지 앱이면 AppxManifest.xml의 DisplayName을 현지화해서 돌려준다.</summary>
+        static string PackagedAppName(string path)
+        {
+            const string marker = @"\WindowsApps\";
+            int i = path.IndexOf(marker, StringComparison.OrdinalIgnoreCase);
+            if (i < 0) return null;
+            int start = i + marker.Length;
+            int end = path.IndexOf('\\', start);
+            if (end < 0) return null;
+            string fullName = path.Substring(start, end - start);           // 패키지 전체 이름 (폴더명)
+            string manifest = System.IO.Path.Combine(path.Substring(0, end), "AppxManifest.xml");
+            if (!File.Exists(manifest)) return null;
+
+            string xml = File.ReadAllText(manifest);
+            string identity = Attr(xml, "<Identity", "Name");
+            string display = Element(xml, "<Properties>", "DisplayName");
+            if (string.IsNullOrEmpty(display)) return null;
+            if (!display.StartsWith("ms-resource:", StringComparison.OrdinalIgnoreCase)) return display;
+            if (identity == null) return null;
+
+            string res = display.Substring("ms-resource:".Length);
+            string uri = res.StartsWith("//") ? "ms-resource:" + res
+                       : res.StartsWith("/") ? "ms-resource://" + identity + res
+                       : res.Contains("/") ? "ms-resource://" + identity + "/" + res
+                       : "ms-resource://" + identity + "/Resources/" + res;
+            var sb = new StringBuilder(512);
+            if (SHLoadIndirectString("@{" + fullName + "?" + uri + "}", sb, (uint)sb.Capacity, IntPtr.Zero) == 0 && sb.Length > 0)
+                return sb.ToString();
+            return null;
+        }
+
+        static string Attr(string xml, string tag, string attr)
+        {
+            int t = xml.IndexOf(tag, StringComparison.Ordinal);
+            if (t < 0) return null;
+            int close = xml.IndexOf('>', t);
+            int a = xml.IndexOf(attr + "=\"", t, StringComparison.Ordinal);
+            if (a < 0 || a > close) return null;
+            a += attr.Length + 2;
+            int e = xml.IndexOf('"', a);
+            return e > a ? xml.Substring(a, e - a) : null;
+        }
+
+        static string Element(string xml, string parentTag, string name)
+        {
+            int p = xml.IndexOf(parentTag, StringComparison.Ordinal);
+            if (p < 0) return null;
+            int s = xml.IndexOf("<" + name + ">", p, StringComparison.Ordinal);
+            if (s < 0) return null;
+            s += name.Length + 2;
+            int e = xml.IndexOf("</" + name + ">", s, StringComparison.Ordinal);
+            return e > s ? xml.Substring(s, e - s).Trim() : null;
+        }
+
+        [DllImport("shlwapi.dll", CharSet = CharSet.Unicode)]
+        static extern int SHLoadIndirectString(string source, StringBuilder outBuf, uint cch, IntPtr reserved);
+
+        /// <summary>실행 시간에 넣지 않는 앱 (바탕화면, 탐색기 셸).</summary>
+        public static bool CountsAsRunning(string id)
+        {
+            return id != null && id != DesktopId && !id.Equals("explorer.exe", StringComparison.OrdinalIgnoreCase);
         }
 
         /// <summary>창의 실제 프로세스 경로. UWP(ApplicationFrameHost)는 안쪽 앱 프로세스를 찾는다.</summary>

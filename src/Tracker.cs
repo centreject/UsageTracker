@@ -21,6 +21,7 @@ namespace UsageTracker
 
         IntPtr fgHwnd;
         string fgApp;
+        string lastActiveApp;
         bool locked, suspended, idle, paused;
         DateTime pauseUntil;          // DateTime.MaxValue = 다시 켤 때까지
         long lastTickTs;
@@ -45,7 +46,9 @@ namespace UsageTracker
             if (locked) return "잠금";
             if (paused) return pauseUntil == DateTime.MaxValue ? "일시정지 중" : "일시정지 중 (" + pauseUntil.ToString("HH:mm") + "까지)";
             if (idle) return "자리 비움";
-            return active != null ? "기록 중: " + apps.NameOf(active.AppId) : "기록 중";
+            // 트레이를 누르면 맨 앞 창이 작업 표시줄로 바뀌므로, 마지막으로 기록한 앱을 보여 준다
+            string id = active != null ? active.AppId : lastActiveApp;
+            return id != null ? "기록 중: " + apps.NameOf(id) : "기록 중";
         }
 
         bool ActiveAllowed { get { return !locked && !suspended && !paused && !idle; } }
@@ -171,7 +174,7 @@ namespace UsageTracker
             {
                 var set = VisibleApps(pathCache);
                 set.UnionWith(audioApps);
-                if (active != null && active.AppId != AppResolver.DesktopId) set.Add(active.AppId);
+                if (active != null && AppResolver.CountsAsRunning(active.AppId)) set.Add(active.AppId);
 
                 var toClose = new List<string>();
                 foreach (var kv in running) if (!set.Contains(kv.Key)) toClose.Add(kv.Key);
@@ -239,7 +242,8 @@ namespace UsageTracker
             if (active == null && want != null)
             {
                 active = Open('A', want, ts, now);
-                if (RunningAllowed && want != AppResolver.DesktopId) EnsureRunning(want, ts, now);
+                lastActiveApp = want;
+                if (RunningAllowed && AppResolver.CountsAsRunning(want)) EnsureRunning(want, ts, now);
             }
 
             if (!RunningAllowed) CloseRunning(ts);

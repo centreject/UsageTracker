@@ -76,6 +76,7 @@ namespace UsageTracker
                     winEvent, 0, 0, Native.WINEVENT_OUTOFCONTEXT | Native.WINEVENT_SKIPOWNPROCESS);
 
                 Safe("start", tracker.Start);
+                UpdateTip();
                 Native.SetTimer(hwnd, TimerTickId, tickMs, IntPtr.Zero);
                 Native.SetTimer(hwnd, TimerFlushId, flushMs, IntPtr.Zero);
                 Native.TrimMemory();
@@ -122,7 +123,18 @@ namespace UsageTracker
 
         static void OnWinEvent(IntPtr h, uint evt, IntPtr window, int idObject, int idChild, uint thread, uint time)
         {
-            Safe("foreground", () => tracker.OnForeground(window));
+            Safe("foreground", () => { tracker.OnForeground(window); UpdateTip(); });
+        }
+
+        static string lastTip;
+
+        /// <summary>상태 문구가 바뀌었을 때만 트레이 툴팁을 고친다.</summary>
+        static void UpdateTip()
+        {
+            string tip = "사용 시간 기록\n" + tracker.StatusText();
+            if (tip == lastTip) return;
+            lastTip = tip;
+            tray.Update(tip);
         }
 
         static IntPtr WindowProc(IntPtr h, uint msg, IntPtr wParam, IntPtr lParam)
@@ -133,12 +145,12 @@ namespace UsageTracker
                 {
                     case Native.WM_TIMER:
                         OnTimer(wParam);
+                        UpdateTip();
                         return IntPtr.Zero;
 
                     case Tray.CallbackMessage:
                         int ev = lParam.ToInt32() & 0xFFFF;
-                        if (ev == 0x0200 /*WM_MOUSEMOVE*/) tray.Update("사용 시간 기록\n" + tracker.StatusText());
-                        else if (ev == Native.WM_RBUTTONUP) OnMenu();
+                        if (ev == Native.WM_RBUTTONUP) { OnMenu(); UpdateTip(); }
                         else if (ev == Native.WM_LBUTTONDBLCLK) ShowNotReady();
                         return IntPtr.Zero;
 
@@ -149,6 +161,7 @@ namespace UsageTracker
                         else if (code == Native.WTS_SESSION_UNLOCK || code == Native.WTS_CONSOLE_CONNECT || code == Native.WTS_REMOTE_CONNECT)
                             tracker.SetLocked(false);
                         UpdateIdleTimer();
+                        UpdateTip();
                         return IntPtr.Zero;
 
                     case Native.WM_POWERBROADCAST:
@@ -156,6 +169,7 @@ namespace UsageTracker
                         if (pbt == Native.PBT_APMSUSPEND) tracker.SetSuspended(true);
                         else if (pbt == Native.PBT_APMRESUMEAUTOMATIC || pbt == Native.PBT_APMRESUMESUSPEND) tracker.SetSuspended(false);
                         UpdateIdleTimer();
+                        UpdateTip();
                         return (IntPtr)1;
 
                     case Native.WM_TIMECHANGE:
@@ -175,7 +189,9 @@ namespace UsageTracker
                 }
                 if (msg == taskbarCreated && taskbarCreated != 0)
                 {
+                    lastTip = null;
                     tray.Add("사용 시간 기록");   // 탐색기가 재시작되면 아이콘을 다시 등록
+                    UpdateTip();
                     return IntPtr.Zero;
                 }
             }
