@@ -14,6 +14,7 @@ namespace UsageTracker.Ui
 
         public static int Run(string dataDir, string[] args)
         {
+            Recorder.DataDir = dataDir;
             int view = 0; string select = null;
             bool settingsOnly = false, devMode = false;
             foreach (var a in args)

@@ -163,7 +163,7 @@ namespace UsageTracker
             };
             Native.RegisterClassEx(ref wc);
             // 보이지 않는 일반 창 (TaskbarCreated 방송을 받으려면 메시지 전용 창이면 안 된다)
-            hwnd = Native.CreateWindowEx(0, wc.lpszClassName, "UsageTracker.Recorder", 0, 0, 0, 0, 0,
+            hwnd = Native.CreateWindowEx(0, wc.lpszClassName, DataMaintenance.RecorderTitle(dataDir), 0, 0, 0, 0, 0,
                 IntPtr.Zero, IntPtr.Zero, wc.hInstance, IntPtr.Zero);
         }
 

@@ -60,9 +60,23 @@ namespace UsageTracker
         /// <summary>
         /// 기록 모드에 삭제·초기화를 요청한다. 기록 모드가 없으면 직접 처리한다.
         /// </summary>
+        /// <summary>
+        /// 기록 모드 창 제목에 데이터 폴더를 넣어, 화면 모드가 같은 데이터 폴더의 기록 모드에만 연락하게 한다
+        /// (시험용 데이터 폴더로 연 화면 모드가 실제 기록 모드에 요청을 보내지 않도록).
+        /// </summary>
+        public static string RecorderTitle(string dataDir)
+        {
+            return "UsageTracker.Recorder|" + dataDir.TrimEnd('\\').ToLowerInvariant();
+        }
+
+        public static IntPtr FindRecorder(string dataDir)
+        {
+            return FindWindow("UsageTracker.Recorder", RecorderTitle(dataDir));
+        }
+
         public static void Request(string dir, int op, ICollection<string> ids)
         {
-            IntPtr h = FindWindow("UsageTracker.Recorder", null);
+            IntPtr h = FindRecorder(dir);
             if (h != IntPtr.Zero)
             {
                 string payload = ids == null ? "" : string.Join("\n", ids);
