@@ -98,6 +98,45 @@ namespace UsageTracker
             return Register(path, pid);
         }
 
+        /// <summary>
+        /// 터미널에서 실행 중인 CLI 도구의 앱 ID. 창 있는 앱과 섞이지 않게 "cli:" 접두어를 붙인다
+        /// (예: Claude CLI의 claude.exe와 Claude 데스크톱 앱의 claude.exe를 구분).
+        /// </summary>
+        public string CliApp(uint pid)
+        {
+            if (pid == 0 || pid == ownPid) return null;
+            string path = ProcessPath(pid);
+            if (path == null || IsSelf(path)) return null;
+            string exeName = System.IO.Path.GetFileName(path);
+            string id, name;
+            if (HostApps.IsHost(exeName))
+            {
+                var target = HostApps.Target(exeName, HostApps.CommandLine(pid));
+                string host = ReadName(path);
+                if (target != null)
+                {
+                    id = "cli:" + exeName.ToLowerInvariant() + ":" + target.Item1.ToLowerInvariant();
+                    string shown = System.IO.Path.GetExtension(target.Item1).Length > 0 && target.Item2 != null
+                        ? System.IO.Path.GetFileNameWithoutExtension(target.Item1) : target.Item1;
+                    name = shown + " (" + host + ")";
+                }
+                else { id = "cli:" + exeName.ToLowerInvariant(); name = host + " (CLI)"; }
+            }
+            else
+            {
+                id = "cli:" + exeName.ToLowerInvariant();
+                name = ReadName(path) + " (CLI)";
+            }
+            AppInfo a;
+            if (!known.TryGetValue(id, out a))
+            {
+                a = new AppInfo { Id = id, Name = name, Path = path, FirstSeen = DateTime.Now };
+                known[id] = a;
+                newApps.Add(a);
+            }
+            return a.Id;
+        }
+
         bool IsSelf(string path)
         {
             return string.Equals(path, ownExe, StringComparison.OrdinalIgnoreCase);

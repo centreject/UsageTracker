@@ -75,6 +75,17 @@ namespace UsageTracker
                 if (id != null) set.Add(id);
                 return true;
             }, IntPtr.Zero);
+
+            // 터미널 안의 CLI 도구 (창이 없어서 위에서는 안 잡힌다)
+            try
+            {
+                foreach (uint pid in CliApps.Pick(CliApps.Snapshot()))
+                {
+                    string id = apps.CliApp(pid);
+                    if (id != null) set.Add(id);
+                }
+            }
+            catch (Exception ex) { ErrorLog.Write("cli", ex); }
             return set;
         }
 

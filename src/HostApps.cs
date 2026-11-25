@@ -65,9 +65,24 @@ namespace UsageTracker
             {
                 string a = args[i];
                 if (a.StartsWith("-") || a.StartsWith("//")) continue;
-                return File(a);
+                var f = File(a);
+                // npm으로 설치한 CLI는 ...\node_modules\@scope\pkg\cli.js 처럼 파일명이 흔하므로 패키지 이름을 쓴다
+                string pkg = f == null ? null : NodePackage(a);
+                return pkg != null ? Tuple.Create(pkg, f.Item2) : f;
             }
             return null;
+        }
+
+        /// <summary>"...\node_modules\@anthropic-ai\claude-code\cli.js" → "claude-code". node_modules 밖이면 null.</summary>
+        public static string NodePackage(string path)
+        {
+            string p = path.Replace('/', '\\');
+            int i = p.LastIndexOf("\\node_modules\\", StringComparison.OrdinalIgnoreCase);
+            if (i < 0) return null;
+            var parts = p.Substring(i + "\\node_modules\\".Length).Split('\\');
+            if (parts.Length == 0 || parts[0].Length == 0) return null;
+            if (parts[0].StartsWith("@")) return parts.Length > 1 && parts[1].Length > 0 ? parts[1] : null;
+            return parts[0];
         }
 
         static Tuple<string, string> File(string path)

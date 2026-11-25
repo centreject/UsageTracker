@@ -74,6 +74,8 @@ namespace UsageTracker
                 { "T23 시작 메뉴 바로가기 만들기·유지", T23_Shortcut },
                 { "T24 읽기 캐시: 파일이 바뀌면 다시 읽음", T24_ReaderCache },
                 { "T25 즐겨찾기 저장·이전 형식 읽기", T25_Favorites },
+                { "T26 터미널 안 CLI 도구 고르기", T26_CliPick },
+                { "T27 npm CLI 패키지 이름", T27_NodePackage },
             };
             foreach (var kv in tests)
             {
@@ -556,6 +558,44 @@ namespace UsageTracker
             True("이름은 그대로", c2.DisplayName("a.exe") == "에이");
             c2.SetFavorite("a.exe", false); c2.Save();
             True("해제 저장", !new AppCatalog(dir).IsFavorite("a.exe"));
+        }
+
+        static void T26_CliPick()
+        {
+            Func<uint, uint, string, CliApps.Proc> P = (pid, ppid, exe) => new CliApps.Proc { Pid = pid, ParentPid = ppid, Exe = exe };
+            var procs = new List<CliApps.Proc>
+            {
+                P(1, 0, "explorer.exe"),
+                P(10, 1, "WindowsTerminal.exe"),
+                P(11, 10, "cmd.exe"),          // 터미널 탭의 셸
+                P(12, 11, "claude.exe"),       // ← CLI 도구 (실측 구조: 도구 ← cmd ← WindowsTerminal)
+                P(13, 12, "node.exe"),         // 도구의 자식은 세지 않음
+                P(14, 11, "conhost.exe"),      // 콘솔 호스트는 무시
+                P(20, 10, "pwsh.exe"),
+                P(21, 20, "cmd.exe"),          // 셸 안의 셸
+                P(22, 21, "python.exe"),       // ← CLI 도구
+                P(30, 1, "cmd.exe"),           // Win+R로 연 cmd (부모 탐색기)
+                P(31, 30, "ping.exe"),         // ← CLI 도구
+                P(40, 1, "Claude.exe"),        // 다른 앱
+                P(41, 40, "cmd.exe"),          // 앱이 뒤에서 띄운 셸
+                P(42, 41, "powershell.exe"),
+                P(43, 42, "git.exe"),          // 세지 않음
+                P(50, 99, "cmd.exe"),          // 부모가 이미 끝난 셸
+                P(51, 50, "node.exe"),         // 세지 않음
+            };
+            var picked = CliApps.Pick(procs);
+            picked.Sort();
+            True("터미널·탐색기에서 연 셸의 자식만: 12, 22, 31 (실제 " + string.Join(",", picked) + ")",
+                picked.Count == 3 && picked[0] == 12 && picked[1] == 22 && picked[2] == 31);
+        }
+
+        static void T27_NodePackage()
+        {
+            True("범위 있는 패키지", HostApps.NodePackage(@"C:\Users\u\AppData\Roaming\npm\node_modules\@anthropic-ai\claude-code\cli.js") == "claude-code");
+            True("일반 패키지", HostApps.NodePackage(@"C:\x\node_modules\typescript\bin\tsc") == "typescript");
+            True("node_modules 밖", HostApps.NodePackage(@"C:\proj\server.js") == null);
+            var t = HostApps.Target("node.exe", "\"C:\\Program Files\\nodejs\\node.exe\" \"C:\\Users\\u\\AppData\\Roaming\\npm\\node_modules\\@anthropic-ai\\claude-code\\cli.js\" --resume");
+            True("node + npm CLI → 패키지 이름", t != null && t.Item1 == "claude-code");
         }
 
         static void T15_ExcludeRunning()
