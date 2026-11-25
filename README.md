@@ -4,7 +4,7 @@ Windows 데스크탑용 프로그램 사용 시간 기록 앱. 백그라운드�
 
 ## 상태
 
-개발 중 — 4단계(화면 모드) 완료. 트레이 아이콘을 더블클릭하면 통계 창이 열린다. 이름 바꾸기·숨기기·합치기·설정·다크 모드는 5단계에서 추가한다. 변경 내용은 [CHANGELOG.md](CHANGELOG.md), 사람이 확인할 항목은 [docs/manual-tests.md](docs/manual-tests.md) 참고.
+기능 완성 — 5단계(목록 관리·설정·다크 모드)까지 완료. 남은 일은 6단계(빌드·검증, 24시간 연속 실행 측정)다. 트레이 아이콘을 더블클릭하면 통계 창이 열린다. 변경 내용은 [CHANGELOG.md](CHANGELOG.md), 사람이 확인할 항목은 [docs/manual-tests.md](docs/manual-tests.md) 참고.
 
 ## 시험
 

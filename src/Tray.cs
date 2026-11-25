@@ -15,6 +15,8 @@ namespace UsageTracker
         public const int CmdAutoStart = 30;
         public const int CmdErrors = 40;
         public const int CmdFlush = 50;   // 화면 모드가 열 때 보내는 저장 요청 (메뉴에는 없음)
+        public const int CmdSettings = 35;
+        public const int CmdReloadSettings = 60;   // 화면 모드가 설정을 저장한 뒤 보냄 (메뉴에는 없음)
         public const int CmdExit = 99;
 
         readonly IntPtr hwnd;
@@ -75,6 +77,7 @@ namespace UsageTracker
                     pauseMenu = IntPtr.Zero;   // 상위 메뉴가 함께 해제한다
                 }
 
+                Native.AppendMenu(menu, Native.MF_STRING, (UIntPtr)CmdSettings, "설정...");
                 uint autoFlags = Native.MF_STRING | (autoStart ? Native.MF_CHECKED : 0) | (autoStartAvailable ? 0 : Native.MF_GRAYED);
                 Native.AppendMenu(menu, autoFlags, (UIntPtr)CmdAutoStart, "Windows 시작 시 실행");
                 if (errorCount > 0)

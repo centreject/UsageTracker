@@ -42,6 +42,41 @@ namespace UsageTracker.Ui
         public Color Back, Panel, Text, Subtle, Border, Grid, Accent, Track;
         public bool Dark;
 
+        /// <summary>Windows 설정(앱 모드: 라이트/다크)을 따른다.</summary>
+        /// <summary>화면 확인용 강제 지정 (--theme=dark|light). null이면 시스템 설정.</summary>
+        public static string Forced;
+
+        public static Theme FromSystem()
+        {
+            if (Forced == "dark") return DarkTheme();
+            if (Forced == "light") return Light();
+            return SystemUsesDark() ? DarkTheme() : Light();
+        }
+
+        public static bool SystemUsesDark()
+        {
+            try
+            {
+                using (var key = Microsoft.Win32.Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize"))
+                {
+                    object v = key == null ? null : key.GetValue("AppsUseLightTheme");
+                    return v is int && (int)v == 0;
+                }
+            }
+            catch { return false; }
+        }
+
+        public static Theme DarkTheme()
+        {
+            return new Theme
+            {
+                Dark = true,
+                Back = Hex(0x1a1a19), Panel = Hex(0x232322), Text = Hex(0xf0efec),
+                Subtle = Hex(0xc3c2b7), Border = Hex(0x383835),
+                Grid = Hex(0x2c2c2a), Accent = Hex(0x3987e5), Track = Hex(0x2c2c2a)
+            };
+        }
+
         public static Theme Light()
         {
             return new Theme
@@ -142,6 +177,15 @@ namespace UsageTracker.Ui
         }
         [DllImport("user32.dll")] static extern IntPtr SendMessage(IntPtr h, uint msg, IntPtr w, IntPtr l);
         [DllImport("user32.dll", EntryPoint = "SendMessage")] static extern IntPtr SendHd(IntPtr h, uint msg, IntPtr w, ref HDITEM l);
+
+        [DllImport("user32.dll")] static extern bool InvalidateRect(IntPtr h, IntPtr rect, bool erase);
+
+        /// <summary>머리글을 직접 그릴 때(OwnerDraw) 정렬이 바뀌면 다시 그리게 한다.</summary>
+        public static void RepaintHeader(ListView lv)
+        {
+            IntPtr header = SendMessage(lv.Handle, 0x101F /*LVM_GETHEADER*/, IntPtr.Zero, IntPtr.Zero);
+            if (header != IntPtr.Zero) InvalidateRect(header, IntPtr.Zero, true);
+        }
 
         public static void Set(ListView lv, int column, bool ascending)
         {

@@ -17,6 +17,7 @@ namespace UsageTracker
         HashSet<string> VisibleApps();            // 보이는 창이 있는 앱 ID
         string NameOf(string appId);
         List<AppInfo> NewApps { get; }
+        void ResetApps();                         // 전체 초기화 후 앱 정보를 처음부터 다시 모은다
     }
 
     /// <summary>실제 Windows 구현.</summary>
@@ -34,6 +35,7 @@ namespace UsageTracker
         public string AppOf(IntPtr hwnd) { return apps.ForegroundApp(hwnd); }
         public string NameOf(string appId) { return apps.NameOf(appId); }
         public List<AppInfo> NewApps { get { return apps.NewApps; } }
+        public void ResetApps() { apps.Reset(); }
 
         public HashSet<string> AudioApps()
         {

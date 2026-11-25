@@ -51,6 +51,13 @@ namespace UsageTracker
         /// <summary>아직 appinfo.tsv에 저장하지 않은 새 앱. 저장 후 비운다.</summary>
         public List<AppInfo> NewApps { get { return newApps; } }
 
+        public void Reset()
+        {
+            known.Clear();
+            byPath.Clear();
+            newApps.Clear();
+        }
+
         public string NameOf(string id)
         {
             AppInfo a;

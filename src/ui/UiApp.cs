@@ -15,10 +15,28 @@ namespace UsageTracker.Ui
         public static int Run(string dataDir, string[] args)
         {
             int view = 0; string select = null;
+            bool settingsOnly = false, devMode = false;
             foreach (var a in args)
             {
                 if (a.StartsWith("--view=")) int.TryParse(a.Substring(7), out view);
                 else if (a.StartsWith("--select=")) select = a.Substring(9);
+                else if (a == "--settings") settingsOnly = true;
+                else if (a.StartsWith("--theme=")) Theme.Forced = a.Substring(8);
+                else if (a.StartsWith("--data=")) devMode = true;
+            }
+
+            if (settingsOnly)
+            {
+                // 트레이 "설정...": 설정 창만 띄운다 (메인 창과 따로)
+                bool first;
+                using (var m = new Mutex(true, "Local\\UsageTracker.Settings", out first))
+                {
+                    if (!first) { Activate("설정 - 사용 시간 기록"); return 0; }
+                    Application.EnableVisualStyles();
+                    Application.SetCompatibleTextRenderingDefault(false);
+                    Application.Run(new SettingsForm(Theme.FromSystem(), dataDir, devMode));
+                }
+                return 0;
             }
             bool created;
             using (var mutex = new Mutex(true, "Local\\UsageTracker.UI", out created))
@@ -26,16 +44,21 @@ namespace UsageTracker.Ui
                 if (!created)
                 {
                     // 이미 열려 있으면 그 창을 앞으로
-                    IntPtr h = FindWindow(null, MainForm.WindowTitle);
-                    if (h != IntPtr.Zero) { ShowWindow(h, 9 /*SW_RESTORE*/); SetForegroundWindow(h); }
+                    Activate(MainForm.WindowTitle);
                     return 0;
                 }
                 Application.EnableVisualStyles();
                 Application.SetCompatibleTextRenderingDefault(false);
                 Application.ThreadException += (s, e) => ErrorLog.Write("ui", e.Exception);
-                Application.Run(new MainForm(dataDir) { InitialView = view, InitialSelect = select });
+                Application.Run(new MainForm(dataDir) { InitialView = view, InitialSelect = select, DevMode = devMode });
             }
             return 0;
+        }
+
+        static void Activate(string title)
+        {
+            IntPtr h = FindWindow(null, title);
+            if (h != IntPtr.Zero) { ShowWindow(h, 9 /*SW_RESTORE*/); SetForegroundWindow(h); }
         }
     }
 }

@@ -23,10 +23,17 @@ namespace UsageTracker.Ui
         {
             public string Key, Name;
             public double Active, Running, Ratio;
+            public bool Hidden;
         }
 
         readonly string dataDir;
-        readonly Theme theme = Theme.Light();
+        Theme theme = Theme.FromSystem();
+        bool showHidden;
+        public bool DevMode;                       // --data로 실행 (자동 시작을 건드리지 않음)
+        readonly CheckBox showHiddenBox = new CheckBox();
+        readonly Button settingsBtn = new Button();
+        readonly ContextMenuStrip menu = new ContextMenuStrip();
+        ToolStripMenuItem miRename, miHide, miMerge, miUnmerge, miDelete;
         AppCatalog catalog;
         readonly IconCache icons;
         readonly ImageList images = new ImageList { ColorDepth = ColorDepth.Depth32Bit };
@@ -77,10 +84,22 @@ namespace UsageTracker.Ui
             images.ImageSize = new Size(iconSize, iconSize);
 
             BuildLayout();
+            BuildMenu();
+            Themer.Apply(this, theme);
             refreshTimer.Tick += (s, e) => { if (IsCurrentPeriod()) RefreshData(); };
             refreshTimer.Start();
+            // Windows 라이트·다크 설정이 바뀌면 따라간다
+            Microsoft.Win32.UserPreferenceChangedEventHandler onPref = (s, e) =>
+            {
+                if (e.Category != Microsoft.Win32.UserPreferenceCategory.General) return;
+                if (Theme.SystemUsesDark() == theme.Dark) return;
+                BeginInvoke((Action)(() => { theme = Theme.FromSystem(); Themer.Apply(this, theme); Themer.TitleBar(this, theme); RefreshData(); }));
+            };
+            Microsoft.Win32.SystemEvents.UserPreferenceChanged += onPref;
+            FormClosed += (s, e) => Microsoft.Win32.SystemEvents.UserPreferenceChanged -= onPref;
             Load += (s, e) =>
             {
+                Themer.TitleBar(this, theme);
                 split.SplitterDistance = Math.Max(300, split.Width - 330);
                 if (InitialView > 0 && InitialView < 4) tabs[InitialView].Checked = true;   // RefreshData 호출됨
                 else RefreshData();
@@ -130,10 +149,19 @@ namespace UsageTracker.Ui
                 tabs[i] = rb;
                 tabBar.Controls.Add(rb);
             }
+            showHiddenBox.Text = "숨긴 항목 보기";
+            showHiddenBox.AutoSize = true;
+            showHiddenBox.Margin = new Padding(16, 7, 0, 0);
+            showHiddenBox.CheckedChanged += (s, e) => { showHidden = showHiddenBox.Checked; RefreshData(); };
+            tabBar.Controls.Add(showHiddenBox);
             top.Controls.Add(tabBar, 0, 0);
 
             var nav = new FlowLayoutPanel { AutoSize = true, WrapContents = false, Anchor = AnchorStyles.Right, Margin = Padding.Empty };
-            foreach (var b in new[] { prevBtn, nextBtn, todayBtn })
+            settingsBtn.Text = "설정";
+            settingsBtn.Width = 56;
+            settingsBtn.Margin = new Padding(8, 3, 0, 3);
+            settingsBtn.Click += (s, e) => OpenSettings();
+            foreach (var b in new[] { prevBtn, nextBtn, todayBtn, settingsBtn })
             {
                 b.FlatStyle = FlatStyle.Flat;
                 b.FlatAppearance.BorderColor = theme.Border;
@@ -149,7 +177,7 @@ namespace UsageTracker.Ui
             prevBtn.Click += (s, e) => MovePeriod(-1);
             nextBtn.Click += (s, e) => MovePeriod(1);
             todayBtn.Click += (s, e) => { anchor = DateTime.Today; RefreshData(); };
-            nav.Controls.AddRange(new Control[] { prevBtn, periodLabel, nextBtn, todayBtn });
+            nav.Controls.AddRange(new Control[] { prevBtn, periodLabel, nextBtn, todayBtn, settingsBtn });
             top.Controls.Add(nav, 1, 0);
             root.Controls.Add(top, 0, 0);
 
@@ -167,6 +195,7 @@ namespace UsageTracker.Ui
             split.BackColor = theme.Border;
             split.Panel1.BackColor = theme.Back;
             split.Panel2.BackColor = theme.Panel;
+            split.Panel2.Tag = "panel";
             split.SplitterWidth = 1;
             split.Margin = new Padding(0, 0, 0, 6);
 
@@ -174,8 +203,16 @@ namespace UsageTracker.Ui
             list.View = View.Details;
             list.FullRowSelect = true;
             list.HideSelection = false;
-            list.MultiSelect = false;
+            list.MultiSelect = true;   // 합치기용
             list.BorderStyle = BorderStyle.None;
+            list.OwnerDraw = true;     // 머리글을 테마 색으로 그린다 (항목은 기본 그리기)
+            list.DrawColumnHeader += DrawHeader;
+            list.DrawItem += (s, e) => { };          // 칸별로 그린다 (DrawSubItem)
+            list.DrawSubItem += DrawCell;
+            list.GotFocus += (s, e) => list.Invalidate();
+            list.LostFocus += (s, e) => list.Invalidate();
+            list.DoubleClick += (s, e) => Rename();
+            list.ContextMenuStrip = menu;
             list.SmallImageList = images;
             list.BackColor = theme.Back;
             list.ForeColor = theme.Text;
@@ -193,6 +230,7 @@ namespace UsageTracker.Ui
             detail.Padding = new Padding(16, 14, 12, 12);
             detail.AutoScroll = true;
             detail.BackColor = theme.Panel;
+            detail.Tag = "panel";
             detail.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
             detail.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
             split.Panel2.Controls.Add(detail);
@@ -211,11 +249,157 @@ namespace UsageTracker.Ui
             summary.AutoSize = true;
             summary.Margin = new Padding(0, 4, 0, 0);
             status.AutoSize = true;
-            status.ForeColor = theme.Subtle;
+            status.Tag = "subtle";
             status.Margin = new Padding(0, 4, 0, 0);
             bottom.Controls.Add(summary, 0, 0);
             bottom.Controls.Add(status, 1, 0);
             root.Controls.Add(bottom, 0, 4);
+        }
+
+        void DrawHeader(object sender, DrawListViewColumnHeaderEventArgs e)
+        {
+            using (var b = new SolidBrush(theme.Back)) e.Graphics.FillRectangle(b, e.Bounds);
+            using (var p = new Pen(theme.Border)) e.Graphics.DrawLine(p, e.Bounds.Left, e.Bounds.Bottom - 1, e.Bounds.Right, e.Bounds.Bottom - 1);
+            var flags = TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis |
+                        (e.Header.TextAlign == HorizontalAlignment.Right ? TextFormatFlags.Right : TextFormatFlags.Left);
+            var r = new Rectangle(e.Bounds.X + 6, e.Bounds.Y, e.Bounds.Width - 12, e.Bounds.Height);
+            string text = e.Header.Text + (e.ColumnIndex == sortCol ? (sortAsc ? " ▲" : " ▼") : "");
+            TextRenderer.DrawText(e.Graphics, text, e.ColumnIndex == sortCol ? boldFont : Font, r, theme.Subtle, flags);
+        }
+
+        /// <summary>목록 칸 그리기: 테마 색 배경·선택 색, 첫 칸은 아이콘 + 이름.</summary>
+        void DrawCell(object sender, DrawListViewSubItemEventArgs e)
+        {
+            var row = (Row)e.Item.Tag;
+            Color back = theme.Back;
+            if (e.Item.Selected)
+                back = theme.Dark ? Color.FromArgb(list.Focused ? 0x1f : 0x2c, list.Focused ? 0x40 : 0x2c, list.Focused ? 0x68 : 0x2c)
+                                  : (list.Focused ? Color.FromArgb(0xdd, 0xea, 0xfb) : Color.FromArgb(0xec, 0xeb, 0xe6));
+            using (var b = new SolidBrush(back)) e.Graphics.FillRectangle(b, e.Bounds);
+
+            var r = e.Bounds;
+            Color fore = row.Hidden ? theme.Subtle : theme.Text;
+            if (e.ColumnIndex == 0)
+            {
+                int sz = images.ImageSize.Width;
+                int iconIndex = images.Images.IndexOfKey(row.Key);
+                if (iconIndex >= 0) e.Graphics.DrawImage(images.Images[iconIndex], r.X + 4, r.Y + (r.Height - sz) / 2, sz, sz);
+                var tr = new Rectangle(r.X + sz + 10, r.Y, r.Width - sz - 12, r.Height);
+                TextRenderer.DrawText(e.Graphics, e.SubItem.Text, list.Font, tr, fore,
+                    TextFormatFlags.VerticalCenter | TextFormatFlags.Left | TextFormatFlags.EndEllipsis | TextFormatFlags.NoPrefix);
+            }
+            else
+            {
+                var tr = new Rectangle(r.X + 4, r.Y, r.Width - 10, r.Height);
+                TextRenderer.DrawText(e.Graphics, e.SubItem.Text, list.Font, tr, fore,
+                    TextFormatFlags.VerticalCenter | TextFormatFlags.Right | TextFormatFlags.EndEllipsis | TextFormatFlags.NoPrefix);
+            }
+        }
+
+        // ---------- 목록 오른쪽 클릭 메뉴: 이름 바꾸기·숨기기·합치기·해제·기록 삭제 ----------
+
+        void BuildMenu()
+        {
+            miRename = new ToolStripMenuItem("이름 바꾸기", null, (s, e) => Rename()) { ShortcutKeyDisplayString = "F2" };
+            miHide = new ToolStripMenuItem("숨기기", null, (s, e) => ToggleHidden());
+            miMerge = new ToolStripMenuItem("합치기...", null, (s, e) => Merge());
+            miUnmerge = new ToolStripMenuItem("합치기 해제", null, (s, e) => Unmerge());
+            miDelete = new ToolStripMenuItem("기록 삭제...", null, (s, e) => DeleteRecords()) { Tag = "danger" };
+            menu.Items.AddRange(new ToolStripItem[] { miRename, miHide, new ToolStripSeparator(), miMerge, miUnmerge, new ToolStripSeparator(), miDelete });
+            menu.Opening += (s, e) =>
+            {
+                var keys = SelectedKeys();
+                if (keys.Count == 0) { e.Cancel = true; return; }
+                bool one = keys.Count == 1;
+                miRename.Enabled = one;
+                miHide.Text = keys.All(k => catalog.IsHidden(k)) ? "숨김 해제" : "숨기기";
+                miMerge.Enabled = keys.Count >= 2;
+                miUnmerge.Visible = one && AppCatalog.IsGroup(keys[0]);
+                miDelete.Text = one ? "이 앱의 기록 삭제..." : "선택한 " + keys.Count + "개 앱의 기록 삭제...";
+            };
+        }
+
+        List<string> SelectedKeys()
+        {
+            var l = new List<string>();
+            foreach (ListViewItem i in list.SelectedItems) l.Add(((Row)i.Tag).Key);
+            return l;
+        }
+
+        void Rename()
+        {
+            var keys = SelectedKeys();
+            if (keys.Count != 1) return;
+            string key = keys[0];
+            bool group = AppCatalog.IsGroup(key);
+            using (var d = new NameDialog(theme, "이름 바꾸기", group ? "묶음 이름" : "표시할 이름 (비우면 원래 이름)",
+                       catalog.DisplayName(key), group ? null : catalog.OriginalName(key)))
+            {
+                if (d.ShowDialog(this) != DialogResult.OK) return;
+                if (group && string.IsNullOrWhiteSpace(d.Value)) return;
+                catalog.Rename(key, d.Value);
+                catalog.Save();
+            }
+            RefreshData();
+        }
+
+        void ToggleHidden()
+        {
+            var keys = SelectedKeys();
+            bool hide = !keys.All(k => catalog.IsHidden(k));
+            foreach (var k in keys) catalog.SetHidden(k, hide);
+            catalog.Save();
+            RefreshData();
+        }
+
+        void Merge()
+        {
+            var keys = SelectedKeys();
+            if (keys.Count < 2) return;
+            // 기본 이름: 이 기간 활성 시간이 가장 긴 항목의 이름
+            var top = rows.Where(r => keys.Contains(r.Key)).OrderByDescending(r => r.Active).First();
+            using (var d = new NameDialog(theme, "합치기", keys.Count + "개 항목을 하나로 묶어요. 묶음 이름:", top.Name, null))
+            {
+                if (d.ShowDialog(this) != DialogResult.OK || string.IsNullOrWhiteSpace(d.Value)) return;
+                string g = catalog.Merge(keys, d.Value.Trim());
+                catalog.Save();
+                RefreshData();
+                SelectKey(g);
+            }
+        }
+
+        void Unmerge()
+        {
+            var keys = SelectedKeys();
+            if (keys.Count != 1 || !AppCatalog.IsGroup(keys[0])) return;
+            catalog.Unmerge(keys[0]);
+            catalog.Save();
+            RefreshData();
+        }
+
+        void DeleteRecords()
+        {
+            var keys = SelectedKeys();
+            if (keys.Count == 0) return;
+            var ids = new List<string>();
+            foreach (var k in keys) ids.AddRange(AppCatalog.IsGroup(k) ? catalog.Members(k) : new List<string> { k });
+            string what = keys.Count == 1 ? "'" + catalog.DisplayName(keys[0]) + "'" : "선택한 " + keys.Count + "개 항목";
+            if (MessageBox.Show(this, what + "의 모든 기간 사용 기록을 지울까요?\n되돌릴 수 없어요. 앱은 앞으로도 계속 기록돼요.",
+                    "기록 삭제", MessageBoxButtons.YesNo, MessageBoxIcon.Warning, MessageBoxDefaultButton.Button2) != DialogResult.Yes) return;
+            try { DataMaintenance.Request(dataDir, DataMaintenance.OpDelete, ids); }
+            catch (Exception ex) { MessageBox.Show(this, "기록을 지우지 못했어요: " + ex.Message, "기록 삭제"); }
+            RefreshData();
+        }
+
+        void OpenSettings()
+        {
+            using (var f = new SettingsForm(theme, dataDir, DevMode))
+            {
+                f.StartPosition = FormStartPosition.CenterParent;
+                f.ShowDialog(this);
+                if (f.Uninstalled) { Close(); return; }
+                if (f.DataChanged) RefreshData();
+            }
         }
 
         void FitNameColumn()
@@ -229,6 +413,7 @@ namespace UsageTracker.Ui
         protected override void OnKeyDown(KeyEventArgs e)
         {
             if (e.KeyCode == Keys.F5) { RefreshData(); e.Handled = true; }
+            else if (e.KeyCode == Keys.F2 && list.Focused) { Rename(); e.Handled = true; }
             else if (e.Alt && e.KeyCode == Keys.Left) { MovePeriod(-1); e.Handled = true; }
             else if (e.Alt && e.KeyCode == Keys.Right) { MovePeriod(1); e.Handled = true; }
             base.OnKeyDown(e);
@@ -313,38 +498,41 @@ namespace UsageTracker.Ui
             sum = UsageReader.Summarize(segs, catalog.KeyOf, from, to);
             sumRaw = UsageReader.Summarize(segs, id => id, from, to);
 
-            // 행 만들기 (숨긴 항목 제외)
+            // 행 만들기 (숨긴 항목은 "숨긴 항목 보기"일 때만, 비율·합계에서는 항상 제외)
             var keys = new HashSet<string>(sum.Active.Keys, StringComparer.OrdinalIgnoreCase);
             keys.UnionWith(sum.Running.Keys);
             double total = 0;
             rows = new List<Row>();
             foreach (var k in keys)
             {
-                if (catalog.IsHidden(k)) continue;
+                bool hidden = catalog.IsHidden(k);
+                if (hidden && !showHidden) continue;
                 double a, r;
                 sum.Active.TryGetValue(k, out a);
                 sum.Running.TryGetValue(k, out r);
-                rows.Add(new Row { Key = k, Name = catalog.DisplayName(k), Active = a, Running = r });
-                total += a;
+                rows.Add(new Row { Key = k, Name = catalog.DisplayName(k), Active = a, Running = r, Hidden = hidden });
+                if (!hidden) total += a;
             }
-            foreach (var row in rows) row.Ratio = total > 0 ? row.Active / total : 0;
+            foreach (var row in rows) row.Ratio = total > 0 && !row.Hidden ? row.Active / total : 0;
+            int hiddenCount = keys.Count(k => catalog.IsHidden(k));
 
-            string selected = SelectedKey();
-            Populate(selected);
+            Populate(SelectedKeys());
 
             bool isDay = period == Period.Day;
             timeline.Visible = isDay;
             if (isDay) timeline.SetData(from, sum.ActiveSegments.Where(s => !catalog.IsHidden(s.AppId)).ToList(), k => catalog.DisplayName(k));
 
             summary.Text = "PC 켜짐 " + Fmt.Short(sum.PcOn) + "   ·   실제 사용 " + Fmt.Short(sum.PcUsed)
-                + "   ·   앱 활성 합계 " + Fmt.Short(total) + "   ·   앱 " + rows.Count + "개";
+                + "   ·   앱 활성 합계 " + Fmt.Short(total) + "   ·   앱 " + rows.Count(r => !r.Hidden) + "개"
+                + (hiddenCount > 0 ? "   ·   숨김 " + hiddenCount + "개" : "");
             if (!status.Text.StartsWith("기록을"))
                 status.Text = recorderAlive ? "기록 중 · " + now.ToString("HH:mm") + " 기준" : "기록 프로그램이 꺼져 있어요";
             OnSelection();
         }
 
-        void Populate(string keepKey)
+        void Populate(List<string> keep)
         {
+            var keepSet = new HashSet<string>(keep, StringComparer.OrdinalIgnoreCase);
             Comparison<Row> cmp;
             switch (sortCol)
             {
@@ -365,15 +553,16 @@ namespace UsageTracker.Ui
             {
                 if (!images.Images.ContainsKey(r.Key))
                     images.Images.Add(r.Key, icons.Get(r.Key, PathOf(r.Key)));
-                var item = new ListViewItem(r.Name, r.Key) { Tag = r };
+                var item = new ListViewItem(r.Hidden ? r.Name + " (숨김)" : r.Name, r.Key) { Tag = r };
+                if (r.Hidden) item.ForeColor = theme.Subtle;
                 item.SubItems.Add(r.Active > 0 ? Fmt.Short(r.Active) : "–");
                 item.SubItems.Add(r.Running > 0 ? Fmt.Short(r.Running) : "–");
-                item.SubItems.Add(r.Active > 0 ? Fmt.Pct(r.Ratio) : "–");
+                item.SubItems.Add(r.Active > 0 && !r.Hidden ? Fmt.Pct(r.Ratio) : "–");
                 list.Items.Add(item);
-                if (keepKey != null && string.Equals(keepKey, r.Key, StringComparison.OrdinalIgnoreCase)) item.Selected = true;
+                if (keepSet.Contains(r.Key)) item.Selected = true;
             }
             list.EndUpdate();
-            SortArrow.Set(list, sortCol, sortAsc);
+            SortArrow.RepaintHeader(list);
             FitNameColumn();
         }
 
@@ -381,7 +570,7 @@ namespace UsageTracker.Ui
         {
             if (col == sortCol) sortAsc = !sortAsc;
             else { sortCol = col; sortAsc = col == 0; }   // 이름은 가나다순, 시간은 큰 것부터
-            Populate(SelectedKey());
+            Populate(SelectedKeys());
         }
 
         string SelectedKey()
@@ -542,11 +731,29 @@ namespace UsageTracker.Ui
         /// <summary>기록 모드에 지금까지의 기록을 저장하라고 요청한다. 기록 모드가 실행 중이면 true.</summary>
         public static bool RequestFlush()
         {
+            return Send(Tray.CmdFlush);
+        }
+
+        /// <summary>기록 모드에 메뉴 명령을 보낸다. 기록 모드가 실행 중이면 true.</summary>
+        public static bool Send(int cmd)
+        {
             IntPtr h = FindWindow("UsageTracker.Recorder", null);
             if (h == IntPtr.Zero) return false;
             IntPtr r;
-            SendMessageTimeout(h, 0x0111 /*WM_COMMAND*/, (IntPtr)Tray.CmdFlush, IntPtr.Zero, 0x2 /*SMTO_ABORTIFHUNG*/, 2000, out r);
+            SendMessageTimeout(h, 0x0111 /*WM_COMMAND*/, (IntPtr)cmd, IntPtr.Zero, 0x2 /*SMTO_ABORTIFHUNG*/, 2000, out r);
             return true;
+        }
+
+        /// <summary>기록 모드를 정상 종료(저장 후 끝)시키고 끝날 때까지 기다린다.</summary>
+        public static void CloseAndWait(int timeoutMs)
+        {
+            IntPtr h = FindWindow("UsageTracker.Recorder", null);
+            if (h == IntPtr.Zero) return;
+            IntPtr r;
+            SendMessageTimeout(h, 0x0010 /*WM_CLOSE*/, IntPtr.Zero, IntPtr.Zero, 0x2, 2000, out r);
+            var until = DateTime.Now.AddMilliseconds(timeoutMs);
+            while (DateTime.Now < until && FindWindow("UsageTracker.Recorder", null) != IntPtr.Zero)
+                System.Threading.Thread.Sleep(100);
         }
     }
 }

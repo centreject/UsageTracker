@@ -29,13 +29,14 @@ namespace UsageTracker
         static string exePath;
         static uint tickMs = 60000, flushMs = 300000;
         static bool idleTimerOn;
+        static int idleSecOverride = -1;
 
         [STAThread]
         static int Main(string[] args)
         {
             string dataDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "UsageTracker");
             manageAutoStart = true;
-            int idleSecOverride = -1;
+            idleSecOverride = -1;
             bool ui = false;
             foreach (var a in args)
             {
@@ -127,9 +128,9 @@ namespace UsageTracker
         }
 
         /// <summary>트레이에서 화면 모드를 연다 (같은 exe를 --ui로 실행).</summary>
-        static void LaunchUi()
+        static void LaunchUi(string extra = "")
         {
-            string args = "--ui" + (manageAutoStart ? "" : " \"--data=" + dataDir + "\"");
+            string args = "--ui" + extra + (manageAutoStart ? "" : " \"--data=" + dataDir + "\"");
             Native.ShellExecute(IntPtr.Zero, "open", exePath, args, null, 1);
         }
 
@@ -216,6 +217,14 @@ namespace UsageTracker
                         if (c != Tray.CmdErrors) { Execute(c); UpdateIdleTimer(); UpdateTip(); }
                         return IntPtr.Zero;
 
+                    case 0x004A: // WM_COPYDATA: 화면 모드의 기록 삭제·초기화 요청
+                        int op; string[] ids;
+                        if (!DataMaintenance.Parse(lParam, out op, out ids)) return IntPtr.Zero;
+                        if (op == DataMaintenance.OpDelete) tracker.DeleteApps(ids);
+                        else tracker.ResetAll();
+                        UpdateTip();
+                        return (IntPtr)1;
+
                     case Native.WM_ENDSESSION:
                         if (wParam != IntPtr.Zero) { tracker.Shutdown(); tray.Remove(); }
                         return IntPtr.Zero;
@@ -298,6 +307,14 @@ namespace UsageTracker
                     break;
                 case Tray.CmdFlush:
                     tracker.Flush();
+                    break;
+                case Tray.CmdSettings:
+                    LaunchUi(" --settings");
+                    break;
+                case Tray.CmdReloadSettings:
+                    settings = new Settings(dataDir);
+                    if (idleSecOverride < 0) tracker.IdleThresholdMs = settings.IdleMinutes * 60 * 1000;
+                    if (manageAutoStart) AutoStart.Apply(settings.AutoStart, exePath);
                     break;
                 case Tray.CmdExit:
                     Native.PostQuitMessage(0);

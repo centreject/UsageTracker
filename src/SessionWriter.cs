@@ -58,6 +58,8 @@ namespace UsageTracker
             dir = dataDir;
         }
 
+        public string Dir { get { return dir; } }
+
         public static string FileFor(string dataDir, DateTime t)
         {
             return Path.Combine(dataDir, "sessions-" + t.ToString("yyyy-MM", CultureInfo.InvariantCulture) + ".tsv");

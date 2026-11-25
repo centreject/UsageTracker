@@ -21,7 +21,7 @@ $sources = @(Get-ChildItem (Join-Path $root 'src') -Filter *.cs -Recurse | ForEa
 $manifest = Join-Path $root 'src\app.manifest'
 & $csc /nologo /target:winexe /optimize+ /codepage:65001 /platform:x64 /warn:4 `
     /r:System.Windows.Forms.dll /r:System.Drawing.dll /r:System.Core.dll `
-    "/win32manifest:$manifest" "/out:$(Join-Path $out 'UsageTracker.exe')" $sources
+    "/win32manifest:$manifest" "/win32icon:$(Join-Path $root 'src\app.ico')" "/out:$(Join-Path $out 'UsageTracker.exe')" $sources
 if ($LASTEXITCODE -ne 0) { throw "Build failed" }
 Copy-Item (Join-Path $root 'src\app.config') (Join-Path $out 'UsageTracker.exe.config') -Force
 Write-Host "Built $out\UsageTracker.exe (v$version)"

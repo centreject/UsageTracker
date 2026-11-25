@@ -291,6 +291,43 @@ namespace UsageTracker
             writer.AddClosed(s, Clock.EndOf(s, endTs));
         }
 
+        // ---------- 삭제·초기화 (화면 모드 요청) ----------
+
+        /// <summary>해당 앱들의 기록을 지운다. 진행 중인 구간은 지금부터 새로 시작한다.</summary>
+        public void DeleteApps(ICollection<string> ids)
+        {
+            Flush();   // 버퍼에 있던 줄까지 파일에 쓴 뒤 지운다
+            DataMaintenance.DeleteApps(writer.Dir, ids);
+            var set = new HashSet<string>(ids, StringComparer.OrdinalIgnoreCase);
+            long ts = env.Ts(); DateTime now = env.Now();
+            if (active != null && set.Contains(active.AppId)) active = Restart(active, ts, now);
+            foreach (var k in new List<string>(running.Keys))
+                if (set.Contains(k)) running[k] = Restart(running[k], ts, now);
+        }
+
+        /// <summary>모든 기록을 지우고 지금부터 다시 기록한다.</summary>
+        public void ResetAll()
+        {
+            Flush();
+            DataMaintenance.ResetAll(writer.Dir);
+            env.ResetApps();
+            long ts = env.Ts(); DateTime now = env.Now();
+            if (on != null) on = Restart(on, ts, now);
+            if (used != null) used = Restart(used, ts, now);
+            if (active != null) { active = null; }
+            CloseRunningSilently();
+            RefreshForeground();
+            ReconcileAt(ts, now);
+            RefreshRunning();
+        }
+
+        static Segment Restart(Segment s, long ts, DateTime now)
+        {
+            return new Segment { Kind = s.Kind, AppId = s.AppId, Start = now, StartTs = ts };
+        }
+
+        void CloseRunningSilently() { running.Clear(); }
+
         // ---------- 저장 ----------
 
         public void Flush()

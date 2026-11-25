@@ -34,6 +34,7 @@ namespace UsageTracker
             public HashSet<string> VisibleApps() { return new HashSet<string>(Visible, StringComparer.OrdinalIgnoreCase); }
             public string NameOf(string id) { return id; }
             public List<AppInfo> NewApps { get { return none; } }
+            public void ResetApps() { }
 
             public void At(double t) { T = t; LastInputT = t; }   // 그 시각에 입력이 있었다
         }
@@ -63,6 +64,9 @@ namespace UsageTracker
                 { "T13 묶음 실행 시간 합집합, 시간대별 분할", T13_UnionHourly },
                 { "T14 이름·숨김·합치기·해제 저장", T14_Catalog },
                 { "T15 실행 시간에서 탐색기·바탕화면 제외", T15_ExcludeRunning },
+                { "T16 앱 기록 삭제 (기록 중)", T16_DeleteApps },
+                { "T17 전체 기록 초기화 (기록 중)", T17_ResetAll },
+                { "T18 기록 모드 없이 삭제", T18_DeleteOffline },
             };
             foreach (var kv in tests)
             {
@@ -396,6 +400,51 @@ namespace UsageTracker
             True("해제: 원래 키로", c3.KeyOf("a.exe") == "a.exe" && c3.KeyOf("b.exe") == "b.exe");
             c3.Rename("a.exe", "  ");
             True("빈 이름이면 원래 이름", c3.DisplayName("a.exe") == "a.exe");
+        }
+
+        static void T16_DeleteApps()
+        {
+            var env = NewEnv(); string dir = NewDir();
+            env.Visible.Add("a.exe"); env.Visible.Add("b.exe");
+            var t = NewTracker(env, dir);
+            env.At(60); env.Fg = "b.exe"; t.OnForeground((IntPtr)1);
+            env.At(120); env.Fg = "a.exe"; t.OnForeground((IntPtr)1);
+            env.At(150); t.Flush();
+            env.At(180); t.DeleteApps(new[] { "a.exe" });   // a 활성 중에 삭제
+            env.At(240); t.Shutdown();
+            var s = Sum(dir, env.Base);
+            Near("a 활성은 삭제 뒤 60초만 남음", 60, Get(s.Active, "a.exe"));
+            Near("a 실행도 삭제 뒤 60초만", 60, Get(s.Running, "a.exe"));
+            Near("b 활성은 그대로", 60, Get(s.Active, "b.exe"));
+            Near("b 실행은 그대로", 240, Get(s.Running, "b.exe"));
+            Near("PC 켜짐은 그대로", 240, s.PcOn);
+        }
+
+        static void T17_ResetAll()
+        {
+            var env = NewEnv(); string dir = NewDir();
+            env.Visible.Add("a.exe");
+            var t = NewTracker(env, dir);
+            env.At(100); t.Flush();
+            env.At(120); t.ResetAll();
+            env.At(180); t.Shutdown();
+            var s = Sum(dir, env.Base);
+            Near("초기화 뒤 활성 60초만", 60, Get(s.Active, "a.exe"));
+            Near("초기화 뒤 PC 켜짐 60초만", 60, s.PcOn);
+            Near("초기화 뒤 실행 60초만", 60, Get(s.Running, "a.exe"));
+        }
+
+        static void T18_DeleteOffline()
+        {
+            var env = NewEnv(); string dir = NewDir();
+            var t = NewTracker(env, dir);
+            env.At(60); env.Fg = "b.exe"; t.OnForeground((IntPtr)1);
+            env.At(120); t.Shutdown();
+            int removed = DataMaintenance.DeleteApps(dir, new[] { "b.exe" });
+            var s = Sum(dir, env.Base);
+            True("지운 줄이 있음", removed > 0);
+            Near("b 기록 없음", 0, Get(s.Active, "b.exe") + Get(s.Running, "b.exe"));
+            Near("a 기록은 그대로", 60, Get(s.Active, "a.exe"));
         }
 
         static void T15_ExcludeRunning()
