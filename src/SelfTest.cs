@@ -73,6 +73,7 @@ namespace UsageTracker
                 { "T22 날짜별 활성 시간", T22_Daily },
                 { "T23 시작 메뉴 바로가기 만들기·유지", T23_Shortcut },
                 { "T24 읽기 캐시: 파일이 바뀌면 다시 읽음", T24_ReaderCache },
+                { "T25 즐겨찾기 저장·이전 형식 읽기", T25_Favorites },
             };
             foreach (var kv in tests)
             {
@@ -534,6 +535,27 @@ namespace UsageTracker
             Near("덧붙인 뒤 b", 60, Get(s3.Active, "b.exe"));
             DataMaintenance.DeleteApps(dir, new[] { "b.exe" });   // 다시 쓰기 → 다시 읽어야 한다
             Near("삭제 뒤 b 없음", 0, Get(Sum(dir, env.Base).Active, "b.exe"));
+        }
+
+        static void T25_Favorites()
+        {
+            string dir = NewDir();
+            // v0.7 이하 형식(즐겨찾기 열 없음)도 읽혀야 한다
+            File.WriteAllText(Path.Combine(dir, "apps.tsv"), "V\t1\r\na.exe\t에이\t\t0\r\n", new UTF8Encoding(false));
+            var c = new AppCatalog(dir);
+            True("이전 형식: 이름 유지", c.DisplayName("a.exe") == "에이");
+            True("이전 형식: 즐겨찾기 아님", !c.IsFavorite("a.exe"));
+            c.SetFavorite("a.exe", true);
+            c.SetFavorite("b.exe", true);
+            string g = c.Merge(new[] { "c.exe", "d.exe" }, "묶음");
+            c.SetFavorite(g, true);
+            c.Save();
+            var c2 = new AppCatalog(dir);
+            True("앱 즐겨찾기 저장", c2.IsFavorite("a.exe") && c2.IsFavorite("b.exe"));
+            True("묶음 즐겨찾기 저장", c2.IsFavorite(g));
+            True("이름은 그대로", c2.DisplayName("a.exe") == "에이");
+            c2.SetFavorite("a.exe", false); c2.Save();
+            True("해제 저장", !new AppCatalog(dir).IsFavorite("a.exe"));
         }
 
         static void T15_ExcludeRunning()

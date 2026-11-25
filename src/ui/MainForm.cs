@@ -24,6 +24,7 @@ namespace UsageTracker.Ui
             public string Key, Name;
             public double Active, Running, Ratio;
             public bool Hidden;
+            public bool Favorite;
         }
 
         readonly string dataDir;
@@ -31,9 +32,11 @@ namespace UsageTracker.Ui
         bool showHidden;
         public bool DevMode;                       // --data로 실행 (자동 시작을 건드리지 않음)
         readonly CheckBox showHiddenBox = new CheckBox();
+        readonly CheckBox favOnlyBox = new CheckBox();
+        bool favOnly;
         readonly Button settingsBtn = new Button();
         readonly ContextMenuStrip menu = new ContextMenuStrip();
-        ToolStripMenuItem miRename, miHide, miMerge, miUnmerge, miDelete;
+        ToolStripMenuItem miRename, miHide, miFavorite, miMerge, miUnmerge, miDelete;
         AppCatalog catalog;
         readonly IconCache icons;
         readonly ImageList images = new ImageList { ColorDepth = ColorDepth.Depth32Bit };
@@ -67,6 +70,7 @@ namespace UsageTracker.Ui
         /// <summary>처음 보여 줄 기간(0=일 1=주 2=월 3=년)과 선택할 앱. 화면 확인용 (--view=, --select=).</summary>
         public int InitialView;
         public string InitialSelect;
+        public bool InitialFavOnly;   // --favonly (화면 확인용)
 
         public MainForm(string dataDir)
         {
@@ -117,6 +121,7 @@ namespace UsageTracker.Ui
             {
                 Themer.TitleBar(this, theme);
                 split.SplitterDistance = Math.Max(300, split.Width - 330);
+                if (InitialFavOnly) favOnlyBox.Checked = true;
                 if (InitialView > 0 && InitialView < 4) tabs[InitialView].Checked = true;   // RefreshData 호출됨
                 else RefreshData();
                 if (InitialSelect != null) SelectKey(InitialSelect);
@@ -170,6 +175,11 @@ namespace UsageTracker.Ui
             showHiddenBox.Margin = new Padding(16, 7, 0, 0);
             showHiddenBox.CheckedChanged += (s, e) => { showHidden = showHiddenBox.Checked; RefreshData(); };
             tabBar.Controls.Add(showHiddenBox);
+            favOnlyBox.Text = "★ 즐겨찾기만";
+            favOnlyBox.AutoSize = true;
+            favOnlyBox.Margin = new Padding(12, 7, 0, 0);
+            favOnlyBox.CheckedChanged += (s, e) => { favOnly = favOnlyBox.Checked; Populate(SelectedKeys()); OnSelection(); };
+            tabBar.Controls.Add(favOnlyBox);
             top.Controls.Add(tabBar, 0, 0);
 
             var nav = new FlowLayoutPanel { AutoSize = true, WrapContents = false, Anchor = AnchorStyles.Right, Margin = Padding.Empty };
@@ -234,6 +244,17 @@ namespace UsageTracker.Ui
                 else Rename();
             };
             list.ContextMenuStrip = menu;
+            list.MouseClick += (s, e) =>
+            {
+                // 이름 칸의 별 자리를 누르면 즐겨찾기 켜고 끄기
+                var hit = list.HitTest(e.Location);
+                if (hit.Item == null || e.Button != MouseButtons.Left) return;
+                var row = (Row)hit.Item.Tag;
+                if (row.Key == HiddenKey) return;
+                var b = hit.Item.GetBounds(ItemBoundsPortion.Entire);
+                int x0 = b.X + 4 + images.ImageSize.Width + 4;
+                if (e.X >= x0 && e.X <= x0 + StarWidth) ToggleFavorite(new List<string> { row.Key });
+            };
             list.SmallImageList = images;
             list.BackColor = theme.Back;
             list.ForeColor = theme.Text;
@@ -318,6 +339,8 @@ namespace UsageTracker.Ui
             TextRenderer.DrawText(e.Graphics, text, e.ColumnIndex == sortCol ? boldFont : Font, r, theme.Subtle, flags);
         }
 
+        int StarWidth { get { return images.ImageSize.Width; } }
+
         /// <summary>목록 칸 그리기: 테마 색 배경·선택 색, 첫 칸은 아이콘 + 이름.</summary>
         void DrawCell(object sender, DrawListViewSubItemEventArgs e)
         {
@@ -335,7 +358,12 @@ namespace UsageTracker.Ui
                 int sz = images.ImageSize.Width;
                 int iconIndex = images.Images.IndexOfKey(row.Key);
                 if (iconIndex >= 0) e.Graphics.DrawImage(images.Images[iconIndex], r.X + 4, r.Y + (r.Height - sz) / 2, sz, sz);
-                var tr = new Rectangle(r.X + sz + 10, r.Y, r.Width - sz - 12, r.Height);
+                // 아이콘 옆 별 자리: 즐겨찾기면 노란 별 (자리는 항상 비워 둬서 이름 줄이 맞는다)
+                var star = new Rectangle(r.X + sz + 8, r.Y, StarWidth, r.Height);
+                if (row.Favorite)
+                    TextRenderer.DrawText(e.Graphics, "★", list.Font, star, theme.Dark ? Color.FromArgb(0xc9, 0x85, 0x00) : Color.FromArgb(0xed, 0xa1, 0x00),
+                        TextFormatFlags.VerticalCenter | TextFormatFlags.HorizontalCenter | TextFormatFlags.NoPadding);
+                var tr = new Rectangle(star.Right + 2, r.Y, r.Right - star.Right - 4, r.Height);
                 TextRenderer.DrawText(e.Graphics, e.SubItem.Text, list.Font, tr, fore,
                     TextFormatFlags.VerticalCenter | TextFormatFlags.Left | TextFormatFlags.EndEllipsis | TextFormatFlags.NoPrefix);
             }
@@ -353,10 +381,11 @@ namespace UsageTracker.Ui
         {
             miRename = new ToolStripMenuItem("이름 바꾸기", null, (s, e) => Rename()) { ShortcutKeyDisplayString = "F2" };
             miHide = new ToolStripMenuItem("숨기기", null, (s, e) => ToggleHidden());
+            miFavorite = new ToolStripMenuItem("즐겨찾기에 추가", null, (s, e) => ToggleFavorite(SelectedKeys()));
             miMerge = new ToolStripMenuItem("합치기...", null, (s, e) => Merge());
             miUnmerge = new ToolStripMenuItem("합치기 해제", null, (s, e) => Unmerge());
             miDelete = new ToolStripMenuItem("기록 삭제...", null, (s, e) => DeleteRecords()) { Tag = "danger" };
-            menu.Items.AddRange(new ToolStripItem[] { miRename, miHide, new ToolStripSeparator(), miMerge, miUnmerge, new ToolStripSeparator(), miDelete });
+            menu.Items.AddRange(new ToolStripItem[] { miRename, miFavorite, miHide, new ToolStripSeparator(), miMerge, miUnmerge, new ToolStripSeparator(), miDelete });
             menu.Opening += (s, e) =>
             {
                 var picked = SelectedKeys();
@@ -367,6 +396,8 @@ namespace UsageTracker.Ui
                 miRename.Enabled = one && !hiddenRow;
                 miHide.Text = hiddenRow && one ? "모두 숨김 해제" : (keys.All(k => catalog.IsHidden(k)) ? "숨김 해제" : "숨기기");
                 miMerge.Enabled = picked.Count >= 2 && !hiddenRow;
+                miFavorite.Enabled = !hiddenRow;
+                miFavorite.Text = picked.All(k => catalog.IsFavorite(k)) ? "즐겨찾기 해제" : "즐겨찾기에 추가";
                 miUnmerge.Visible = one && AppCatalog.IsGroup(picked[0]);
                 miDelete.Text = hiddenRow && one ? "숨긴 앱 " + keys.Count + "개의 기록 모두 삭제..."
                               : one ? "이 앱의 기록 삭제..." : "선택한 " + keys.Count + "개 앱의 기록 삭제...";
@@ -395,6 +426,16 @@ namespace UsageTracker.Ui
                 catalog.Rename(key, d.Value);
                 catalog.Save();
             }
+            RefreshData();
+        }
+
+        void ToggleFavorite(List<string> keys)
+        {
+            keys = keys.Where(k => k != HiddenKey).ToList();
+            if (keys.Count == 0) return;
+            bool fav = !keys.All(k => catalog.IsFavorite(k));
+            foreach (var k in keys) catalog.SetFavorite(k, fav);
+            catalog.Save();
             RefreshData();
         }
 
@@ -635,7 +676,7 @@ namespace UsageTracker.Ui
                 sum.Active.TryGetValue(k, out a);
                 sum.Running.TryGetValue(k, out r);
                 bool hidden = k == HiddenKey || catalog.IsHidden(k);
-                rows.Add(new Row { Key = k, Name = NameOf(k), Active = a, Running = r, Hidden = hidden });
+                rows.Add(new Row { Key = k, Name = NameOf(k), Active = a, Running = r, Hidden = hidden, Favorite = k != HiddenKey && catalog.IsFavorite(k) });
                 total += a;
             }
             foreach (var row in rows) row.Ratio = total > 0 ? row.Active / total : 0;
@@ -680,6 +721,7 @@ namespace UsageTracker.Ui
             list.Items.Clear();
             foreach (var r in rows)
             {
+                if (favOnly && !r.Favorite) continue;   // 보기만 거른다 (합계·비율은 그대로)
                 if (!images.Images.ContainsKey(r.Key))
                     images.Images.Add(r.Key, icons.Get(r.Key, PathOf(r.Key)));
                 var item = new ListViewItem(r.Hidden && r.Key != HiddenKey ? r.Name + " (숨김)" : r.Name, r.Key) { Tag = r };

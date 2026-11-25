@@ -8,16 +8,17 @@ namespace UsageTracker
 {
     /// <summary>
     /// 사용자가 정한 표시 정보. 화면 모드만 쓴다 (기록 모드는 appinfo.tsv만 씀).
-    ///   apps.tsv   : 앱ID  사용자 이름  묶음ID  숨김(0/1)
-    ///   groups.tsv : 묶음ID  이름  숨김(0/1)
+    ///   apps.tsv   : 앱ID  사용자 이름  묶음ID  숨김(0/1)  즐겨찾기(0/1)
+    ///   groups.tsv : 묶음ID  이름  숨김(0/1)  즐겨찾기(0/1)
+    /// (즐겨찾기 열은 v0.8.0에서 추가. 없으면 0으로 읽는다.)
     /// 묶음 키는 "group:" + 묶음ID. 원본 기록은 exe 단위로 남으므로 묶음을 풀면 그대로 다시 나뉜다.
     /// </summary>
     sealed class AppCatalog
     {
         public const string GroupPrefix = "group:";
 
-        sealed class AppEntry { public string CustomName; public string GroupId; public bool Hidden; }
-        sealed class GroupEntry { public string Name; public bool Hidden; }
+        sealed class AppEntry { public string CustomName; public string GroupId; public bool Hidden, Favorite; }
+        sealed class GroupEntry { public string Name; public bool Hidden, Favorite; }
 
         readonly string dir;
         readonly Dictionary<string, AppEntry> apps = new Dictionary<string, AppEntry>(StringComparer.OrdinalIgnoreCase);
@@ -29,9 +30,9 @@ namespace UsageTracker
             dir = dataDir;
             Info = new SessionWriter(dataDir).LoadAppInfo();
             foreach (var p in ReadTsv("apps.tsv"))
-                if (p.Length >= 4) apps[p[0]] = new AppEntry { CustomName = Empty(p[1]), GroupId = Empty(p[2]), Hidden = p[3] == "1" };
+                if (p.Length >= 4) apps[p[0]] = new AppEntry { CustomName = Empty(p[1]), GroupId = Empty(p[2]), Hidden = p[3] == "1", Favorite = p.Length >= 5 && p[4] == "1" };
             foreach (var p in ReadTsv("groups.tsv"))
-                if (p.Length >= 3) groups[p[0]] = new GroupEntry { Name = p[1], Hidden = p[2] == "1" };
+                if (p.Length >= 3) groups[p[0]] = new GroupEntry { Name = p[1], Hidden = p[2] == "1", Favorite = p.Length >= 4 && p[3] == "1" };
         }
 
         static string Empty(string s) { return string.IsNullOrEmpty(s) ? null : s; }
@@ -124,6 +125,18 @@ namespace UsageTracker
             else Entry(key).CustomName = name;
         }
 
+        public bool IsFavorite(string key)
+        {
+            if (IsGroup(key)) { GroupEntry g; return groups.TryGetValue(key.Substring(GroupPrefix.Length), out g) && g.Favorite; }
+            AppEntry e; return apps.TryGetValue(key, out e) && e.Favorite;
+        }
+
+        public void SetFavorite(string key, bool favorite)
+        {
+            if (IsGroup(key)) { GroupEntry g; if (groups.TryGetValue(key.Substring(GroupPrefix.Length), out g)) g.Favorite = favorite; }
+            else Entry(key).Favorite = favorite;
+        }
+
         public void SetHidden(string key, bool hidden)
         {
             if (IsGroup(key)) { GroupEntry g; if (groups.TryGetValue(key.Substring(GroupPrefix.Length), out g)) g.Hidden = hidden; }
@@ -155,14 +168,15 @@ namespace UsageTracker
         {
             var sb = new StringBuilder("V\t1\r\n");
             foreach (var kv in apps)
-                if (kv.Value.CustomName != null || kv.Value.GroupId != null || kv.Value.Hidden)
+                if (kv.Value.CustomName != null || kv.Value.GroupId != null || kv.Value.Hidden || kv.Value.Favorite)
                     sb.Append(kv.Key).Append('\t').Append(kv.Value.CustomName ?? "").Append('\t').Append(kv.Value.GroupId ?? "")
-                      .Append('\t').Append(kv.Value.Hidden ? "1" : "0").Append("\r\n");
+                      .Append('\t').Append(kv.Value.Hidden ? "1" : "0").Append('\t').Append(kv.Value.Favorite ? "1" : "0").Append("\r\n");
             AtomicFile.WriteAllText(Path.Combine(dir, "apps.tsv"), sb.ToString());
 
             sb = new StringBuilder("V\t1\r\n");
             foreach (var kv in groups)
-                sb.Append(kv.Key).Append('\t').Append(kv.Value.Name).Append('\t').Append(kv.Value.Hidden ? "1" : "0").Append("\r\n");
+                sb.Append(kv.Key).Append('\t').Append(kv.Value.Name).Append('\t').Append(kv.Value.Hidden ? "1" : "0")
+                  .Append('\t').Append(kv.Value.Favorite ? "1" : "0").Append("\r\n");
             AtomicFile.WriteAllText(Path.Combine(dir, "groups.tsv"), sb.ToString());
         }
 
