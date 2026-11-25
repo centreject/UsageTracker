@@ -183,6 +183,11 @@ namespace UsageTracker
                         Native.PostQuitMessage(0);
                         return IntPtr.Zero;
 
+                    case 0x0111: // WM_COMMAND: 메뉴와 같은 명령 (CmdErrors처럼 창을 여는 명령은 제외)
+                        int c = wParam.ToInt32() & 0xFFFF;
+                        if (c != Tray.CmdErrors) { Execute(c); UpdateIdleTimer(); UpdateTip(); }
+                        return IntPtr.Zero;
+
                     case Native.WM_ENDSESSION:
                         if (wParam != IntPtr.Zero) { tracker.Shutdown(); tray.Remove(); }
                         return IntPtr.Zero;
@@ -235,6 +240,12 @@ namespace UsageTracker
         static void OnMenu()
         {
             int cmd = tray.ShowMenu(tracker.StatusText(), tracker.IsPaused, settings.AutoStart, manageAutoStart, ErrorLog.Count);
+            Execute(cmd);
+        }
+
+        /// <summary>트레이 메뉴 명령 실행. WM_COMMAND로도 받는다 (화면 모드·시험 스크립트용).</summary>
+        static void Execute(int cmd)
+        {
             switch (cmd)
             {
                 case Tray.CmdPause15: Pause(15); break;
@@ -245,6 +256,7 @@ namespace UsageTracker
                     tracker.SetPause(0);
                     break;
                 case Tray.CmdAutoStart:
+                    if (!manageAutoStart) break;
                     settings.AutoStart = !settings.AutoStart;
                     settings.Save();
                     AutoStart.Apply(settings.AutoStart, exePath);

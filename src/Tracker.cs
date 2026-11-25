@@ -64,6 +64,7 @@ namespace UsageTracker
             if (recovered > 0) ErrorLog.Write("recover", new Exception("비정상 종료로 열린 구간 " + recovered + "개를 마지막 저장 시점에서 닫음"));
             lastTickTs = Clock.Ts();
             OnForeground(Native.GetForegroundWindow());
+            RefreshRunning();
         }
 
         public void Shutdown()
@@ -88,6 +89,7 @@ namespace UsageTracker
             idle = false;
             if (!value) RefreshForeground();
             Reconcile();
+            if (!value) RefreshRunning();
         }
 
         public void SetSuspended(bool value)
@@ -106,6 +108,7 @@ namespace UsageTracker
                 lastTickTs = Clock.Ts();
                 RefreshForeground();
                 Reconcile();
+                RefreshRunning();
             }
         }
 
@@ -116,6 +119,7 @@ namespace UsageTracker
             pauseUntil = minutes > 0 ? DateTime.Now.AddMinutes(minutes) : DateTime.MaxValue;
             if (!paused) RefreshForeground();
             Reconcile();
+            if (!paused) RefreshRunning();
         }
 
         /// <summary>시스템 시각이 바뀌면 열린 구간을 모두 닫고 새 시각으로 다시 연다.</summary>
@@ -124,6 +128,7 @@ namespace UsageTracker
             CloseAll(Clock.Ts());
             lastTickTs = Clock.Ts();
             Reconcile();
+            RefreshRunning();
         }
 
         void RefreshForeground()
@@ -154,12 +159,7 @@ namespace UsageTracker
             if (suspended) return;
 
             var pathCache = new Dictionary<uint, string>();
-            var audioApps = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-            foreach (uint pid in Audio.ActivePids())
-            {
-                string id = apps.RunningApp(pid, IntPtr.Zero, pathCache);
-                if (id != null) audioApps.Add(id);
-            }
+            var audioApps = AudioApps(pathCache);
 
             // 자리 비움 판정: 입력이 없어도 맨 앞 앱이 소리를 내거나 전체 화면이면 사용 중으로 본다
             if (!idle && !locked)
@@ -169,18 +169,40 @@ namespace UsageTracker
                 if (idleMs >= IdleThresholdMs && !exception) EnterIdle(ts, idleMs);
             }
 
-            // 실행 시간: 보이는 창이 있거나 소리를 내는 앱 + 지금 활성 앱
-            if (RunningAllowed)
-            {
-                var set = VisibleApps(pathCache);
-                set.UnionWith(audioApps);
-                if (active != null && AppResolver.CountsAsRunning(active.AppId)) set.Add(active.AppId);
+            SampleRunning(audioApps, pathCache, ts, now);
+        }
 
-                var toClose = new List<string>();
-                foreach (var kv in running) if (!set.Contains(kv.Key)) toClose.Add(kv.Key);
-                foreach (var id in toClose) { Close(running[id], ts); running.Remove(id); }
-                foreach (var id in set) EnsureRunning(id, ts, now);
+        /// <summary>잠금 해제·절전 복귀·일시정지 해제·시각 변경 직후 실행 시간을 바로 다시 연다 (다음 주기까지 기다리지 않음).</summary>
+        void RefreshRunning()
+        {
+            if (!RunningAllowed) return;
+            var pathCache = new Dictionary<uint, string>();
+            SampleRunning(AudioApps(pathCache), pathCache, Clock.Ts(), DateTime.Now);
+        }
+
+        HashSet<string> AudioApps(Dictionary<uint, string> pathCache)
+        {
+            var audioApps = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (uint pid in Audio.ActivePids())
+            {
+                string id = apps.RunningApp(pid, IntPtr.Zero, pathCache);
+                if (id != null) audioApps.Add(id);
             }
+            return audioApps;
+        }
+
+        /// <summary>실행 시간: 보이는 창이 있거나 소리를 내는 앱 + 지금 활성 앱.</summary>
+        void SampleRunning(HashSet<string> audioApps, Dictionary<uint, string> pathCache, long ts, DateTime now)
+        {
+            if (!RunningAllowed) return;
+            var set = VisibleApps(pathCache);
+            set.UnionWith(audioApps);
+            if (active != null && AppResolver.CountsAsRunning(active.AppId)) set.Add(active.AppId);
+
+            var toClose = new List<string>();
+            foreach (var kv in running) if (!set.Contains(kv.Key)) toClose.Add(kv.Key);
+            foreach (var id in toClose) { Close(running[id], ts); running.Remove(id); }
+            foreach (var id in set) EnsureRunning(id, ts, now);
         }
 
         /// <summary>자리 비움 중 짧은 간격으로 호출. 입력이 돌아오면 true.</summary>

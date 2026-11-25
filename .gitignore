@@ -7,3 +7,4 @@ obj/
 # 로그
 *.log
 testdata/
+testdata-*/
