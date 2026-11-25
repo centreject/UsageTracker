@@ -59,6 +59,8 @@ namespace UsageTracker.Ui
         readonly Label summary = new Label();
         readonly Label status = new Label();
         readonly LinkLabel startLink = new LinkLabel();
+        readonly LinkLabel errorLink = new LinkLabel();
+        DateTime todaySeen = DateTime.Today;
         readonly Timer refreshTimer = new Timer { Interval = 60000 };
         readonly Font titleFont, boldFont;
 
@@ -89,7 +91,18 @@ namespace UsageTracker.Ui
             BuildLayout();
             BuildMenu();
             Themer.Apply(this, theme);
-            refreshTimer.Tick += (s, e) => { if (IsCurrentPeriod()) RefreshData(); };
+            refreshTimer.Tick += (s, e) =>
+            {
+                // 연 채로 자정이 지나면: "오늘"을 보고 있었다면 새 오늘로 넘어간다
+                if (DateTime.Today != todaySeen)
+                {
+                    if (anchor == todaySeen) anchor = DateTime.Today;
+                    todaySeen = DateTime.Today;
+                    RefreshData();
+                    return;
+                }
+                if (IsCurrentPeriod()) RefreshData();
+            };
             refreshTimer.Start();
             // Windows 라이트·다크 설정이 바뀌면 따라간다
             Microsoft.Win32.UserPreferenceChangedEventHandler onPref = (s, e) =>
@@ -189,7 +202,7 @@ namespace UsageTracker.Ui
             timeline.Theme = theme;
             timeline.Margin = new Padding(0, 0, 0, 6);
             timeline.SegmentClicked += SelectKey;
-            timeline.ColorOf = k => theme.SlotColor(catalog.SlotOf(k));
+            timeline.ColorOf = ColorOf;
             root.Controls.Add(timeline, 0, 1);
 
             // 3. 목록 + 상세
@@ -214,7 +227,12 @@ namespace UsageTracker.Ui
             list.DrawSubItem += DrawCell;
             list.GotFocus += (s, e) => list.Invalidate();
             list.LostFocus += (s, e) => list.Invalidate();
-            list.DoubleClick += (s, e) => Rename();
+            list.DoubleClick += (s, e) =>
+            {
+                var k = SelectedKeys();
+                if (k.Count == 1 && k[0] == HiddenKey) showHiddenBox.Checked = true;   // 숨긴 앱 펼치기
+                else Rename();
+            };
             list.ContextMenuStrip = menu;
             list.SmallImageList = images;
             list.BackColor = theme.Back;
@@ -257,10 +275,21 @@ namespace UsageTracker.Ui
             root.Controls.Add(charts, 0, 3);
 
             // 5. 요약
-            var bottom = new TableLayoutPanel { Dock = DockStyle.Fill, AutoSize = true, ColumnCount = 3, Margin = Padding.Empty };
+            var bottom = new TableLayoutPanel { Dock = DockStyle.Fill, AutoSize = true, ColumnCount = 4, Margin = Padding.Empty };
             bottom.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
             bottom.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
             bottom.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+            bottom.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+            // 오늘 생긴 오류(기록 모드·화면 모드 모두)가 있으면 표시, 누르면 로그를 연다
+            errorLink.AutoSize = true;
+            errorLink.Visible = false;
+            errorLink.Tag = "danger";
+            errorLink.Margin = new Padding(8, 4, 0, 0);
+            errorLink.LinkClicked += (s, e) =>
+            {
+                try { Process.Start("notepad.exe", "\"" + Path.Combine(dataDir, "error.log") + "\""); } catch { }
+            };
+            bottom.Controls.Add(errorLink, 3, 0);
             summary.AutoSize = true;
             summary.Margin = new Padding(0, 4, 0, 0);
             status.AutoSize = true;
@@ -330,14 +359,17 @@ namespace UsageTracker.Ui
             menu.Items.AddRange(new ToolStripItem[] { miRename, miHide, new ToolStripSeparator(), miMerge, miUnmerge, new ToolStripSeparator(), miDelete });
             menu.Opening += (s, e) =>
             {
-                var keys = SelectedKeys();
-                if (keys.Count == 0) { e.Cancel = true; return; }
-                bool one = keys.Count == 1;
-                miRename.Enabled = one;
-                miHide.Text = keys.All(k => catalog.IsHidden(k)) ? "숨김 해제" : "숨기기";
-                miMerge.Enabled = keys.Count >= 2;
-                miUnmerge.Visible = one && AppCatalog.IsGroup(keys[0]);
-                miDelete.Text = one ? "이 앱의 기록 삭제..." : "선택한 " + keys.Count + "개 앱의 기록 삭제...";
+                var picked = SelectedKeys();
+                if (picked.Count == 0) { e.Cancel = true; return; }
+                bool hiddenRow = picked.Contains(HiddenKey);
+                var keys = Expand(picked);
+                bool one = picked.Count == 1;
+                miRename.Enabled = one && !hiddenRow;
+                miHide.Text = hiddenRow && one ? "모두 숨김 해제" : (keys.All(k => catalog.IsHidden(k)) ? "숨김 해제" : "숨기기");
+                miMerge.Enabled = picked.Count >= 2 && !hiddenRow;
+                miUnmerge.Visible = one && AppCatalog.IsGroup(picked[0]);
+                miDelete.Text = hiddenRow && one ? "숨긴 앱 " + keys.Count + "개의 기록 모두 삭제..."
+                              : one ? "이 앱의 기록 삭제..." : "선택한 " + keys.Count + "개 앱의 기록 삭제...";
             };
         }
 
@@ -353,6 +385,7 @@ namespace UsageTracker.Ui
             var keys = SelectedKeys();
             if (keys.Count != 1) return;
             string key = keys[0];
+            if (key == HiddenKey) return;
             bool group = AppCatalog.IsGroup(key);
             using (var d = new NameDialog(theme, "이름 바꾸기", group ? "묶음 이름" : "표시할 이름 (비우면 원래 이름)",
                        catalog.DisplayName(key), group ? null : catalog.OriginalName(key)))
@@ -367,7 +400,8 @@ namespace UsageTracker.Ui
 
         void ToggleHidden()
         {
-            var keys = SelectedKeys();
+            var keys = Expand(SelectedKeys());
+            if (keys.Count == 0) return;
             bool hide = !keys.All(k => catalog.IsHidden(k));
             foreach (var k in keys) catalog.SetHidden(k, hide);
             catalog.Save();
@@ -377,7 +411,7 @@ namespace UsageTracker.Ui
         void Merge()
         {
             var keys = SelectedKeys();
-            if (keys.Count < 2) return;
+            if (keys.Count < 2 || keys.Contains(HiddenKey)) return;
             // 기본 이름: 이 기간 활성 시간이 가장 긴 항목의 이름
             var top = rows.Where(r => keys.Contains(r.Key)).OrderByDescending(r => r.Active).First();
             using (var d = new NameDialog(theme, "합치기", keys.Count + "개 항목을 하나로 묶어요. 묶음 이름:", top.Name, null))
@@ -401,16 +435,39 @@ namespace UsageTracker.Ui
 
         void DeleteRecords()
         {
-            var keys = SelectedKeys();
+            var picked = SelectedKeys();
+            var keys = Expand(picked);
             if (keys.Count == 0) return;
             var ids = new List<string>();
             foreach (var k in keys) ids.AddRange(AppCatalog.IsGroup(k) ? catalog.Members(k) : new List<string> { k });
-            string what = keys.Count == 1 ? "'" + catalog.DisplayName(keys[0]) + "'" : "선택한 " + keys.Count + "개 항목";
+            string what = picked.Count == 1 && picked[0] == HiddenKey ? "숨긴 앱 " + keys.Count + "개"
+                        : keys.Count == 1 ? "'" + catalog.DisplayName(keys[0]) + "'" : "선택한 " + keys.Count + "개 항목";
             if (MessageBox.Show(this, what + "의 모든 기간 사용 기록을 지울까요?\n되돌릴 수 없어요. 앱은 앞으로도 계속 기록돼요.",
                     "기록 삭제", MessageBoxButtons.YesNo, MessageBoxIcon.Warning, MessageBoxDefaultButton.Button2) != DialogResult.Yes) return;
             try { DataMaintenance.Request(dataDir, DataMaintenance.OpDelete, ids); }
             catch (Exception ex) { MessageBox.Show(this, "기록을 지우지 못했어요: " + ex.Message, "기록 삭제"); }
             RefreshData();
+        }
+
+        /// <summary>error.log에서 오늘 날짜로 시작하는 항목 수 (복구 안내처럼 오류가 아닌 기록은 뺀다).</summary>
+        int TodayErrorCount()
+        {
+            try
+            {
+                string f = Path.Combine(dataDir, "error.log");
+                if (!File.Exists(f)) return 0;
+                string prefix = DateTime.Today.ToString("yyyy-MM-dd ");
+                int n = 0;
+                using (var fs = new FileStream(f, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete))
+                using (var sr = new StreamReader(fs))
+                {
+                    string line;
+                    while ((line = sr.ReadLine()) != null)
+                        if (line.StartsWith(prefix) && !line.Contains("[recover]")) n++;
+                }
+                return n;
+            }
+            catch { return 0; }
         }
 
         void StartRecorder()
@@ -516,6 +573,36 @@ namespace UsageTracker.Ui
 
         // ---------- 데이터 ----------
 
+        /// <summary>숨긴 앱을 모은 한 줄의 키.</summary>
+        const string HiddenKey = "::hidden";
+        UsageSummary sumKeys;                         // 숨긴 앱을 모으기 전 (앱·묶음 단위)
+        List<string> hiddenInPeriod = new List<string>();
+        int appCount;
+
+        string ViewKey(string appId)
+        {
+            string k = catalog.KeyOf(appId);
+            return !showHidden && catalog.IsHidden(k) ? HiddenKey : k;
+        }
+
+        string NameOf(string key)
+        {
+            return key == HiddenKey ? "숨긴 앱 (" + hiddenInPeriod.Count + "개)" : catalog.DisplayName(key);
+        }
+
+        Color ColorOf(string key)
+        {
+            return key == HiddenKey ? theme.Subtle : theme.SlotColor(catalog.SlotOf(key));
+        }
+
+        /// <summary>선택에 "숨긴 앱" 줄이 있으면 그 안의 숨긴 항목들로 펼친다.</summary>
+        List<string> Expand(List<string> keys)
+        {
+            var l = new List<string>();
+            foreach (var k in keys) { if (k == HiddenKey) l.AddRange(hiddenInPeriod); else l.Add(k); }
+            return l.Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+        }
+
         void RefreshData()
         {
             DateTime from, to;
@@ -530,39 +617,45 @@ namespace UsageTracker.Ui
             List<RawSeg> segs;
             try { segs = UsageReader.Read(dataDir, from, to, now, recorderAlive); }
             catch (Exception ex) { segs = new List<RawSeg>(); status.Text = "기록을 읽지 못했어요: " + ex.Message; }
-            sum = UsageReader.Summarize(segs, catalog.KeyOf, from, to);
+            // 숨긴 항목은 "숨긴 앱" 한 줄로 모은다 ("숨긴 항목 보기"를 켜면 하나씩 흐리게).
+            // 전체 합계·비율·그래프에는 숨긴 항목도 포함한다.
+            sumKeys = UsageReader.Summarize(segs, catalog.KeyOf, from, to);
+            sum = showHidden ? sumKeys : UsageReader.Summarize(segs, ViewKey, from, to);
             sumRaw = UsageReader.Summarize(segs, id => id, from, to);
+            hiddenInPeriod = sumKeys.Active.Keys.Concat(sumKeys.Running.Keys)
+                .Where(k => catalog.IsHidden(k)).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
 
-            // 행 만들기 (숨긴 항목은 "숨긴 항목 보기"일 때만, 비율·합계에서는 항상 제외)
             var keys = new HashSet<string>(sum.Active.Keys, StringComparer.OrdinalIgnoreCase);
             keys.UnionWith(sum.Running.Keys);
             double total = 0;
             rows = new List<Row>();
             foreach (var k in keys)
             {
-                bool hidden = catalog.IsHidden(k);
-                if (hidden && !showHidden) continue;
                 double a, r;
                 sum.Active.TryGetValue(k, out a);
                 sum.Running.TryGetValue(k, out r);
-                rows.Add(new Row { Key = k, Name = catalog.DisplayName(k), Active = a, Running = r, Hidden = hidden });
-                if (!hidden) total += a;
+                bool hidden = k == HiddenKey || catalog.IsHidden(k);
+                rows.Add(new Row { Key = k, Name = NameOf(k), Active = a, Running = r, Hidden = hidden });
+                total += a;
             }
-            foreach (var row in rows) row.Ratio = total > 0 && !row.Hidden ? row.Active / total : 0;
-            int hiddenCount = keys.Count(k => catalog.IsHidden(k));
+            foreach (var row in rows) row.Ratio = total > 0 ? row.Active / total : 0;
 
             Populate(SelectedKeys());
 
             bool isDay = period == Period.Day;
             timeline.Visible = isDay;
-            if (isDay) timeline.SetData(from, sum.ActiveSegments.Where(s => !catalog.IsHidden(s.AppId)).ToList(), k => catalog.DisplayName(k));
+            if (isDay) timeline.SetData(from, sum.ActiveSegments, NameOf);
 
+            appCount = keys.Count - (keys.Contains(HiddenKey) ? 1 : 0) - (showHidden ? hiddenInPeriod.Count : 0);   // 숨기지 않은 앱 수
             summary.Text = "PC 켜짐 " + Fmt.Short(sum.PcOn) + "   ·   실제 사용 " + Fmt.Short(sum.PcUsed)
-                + "   ·   앱 활성 합계 " + Fmt.Short(total) + "   ·   앱 " + rows.Count(r => !r.Hidden) + "개"
-                + (hiddenCount > 0 ? "   ·   숨김 " + hiddenCount + "개" : "");
+                + "   ·   앱 활성 합계 " + Fmt.Short(total) + "   ·   앱 " + appCount + "개"
+                + (hiddenInPeriod.Count > 0 ? "   ·   숨김 " + hiddenInPeriod.Count + "개" : "");
             if (!status.Text.StartsWith("기록을"))
                 status.Text = recorderAlive ? "기록 중 · " + now.ToString("HH:mm") + " 기준" : "기록 프로그램이 꺼져 있어요";
             startLink.Visible = !recorderAlive;
+            int errors = TodayErrorCount();
+            errorLink.Visible = errors > 0;
+            errorLink.Text = "오류 " + errors + "건";
             OnSelection();
         }
 
@@ -589,11 +682,11 @@ namespace UsageTracker.Ui
             {
                 if (!images.Images.ContainsKey(r.Key))
                     images.Images.Add(r.Key, icons.Get(r.Key, PathOf(r.Key)));
-                var item = new ListViewItem(r.Hidden ? r.Name + " (숨김)" : r.Name, r.Key) { Tag = r };
+                var item = new ListViewItem(r.Hidden && r.Key != HiddenKey ? r.Name + " (숨김)" : r.Name, r.Key) { Tag = r };
                 if (r.Hidden) item.ForeColor = theme.Subtle;
                 item.SubItems.Add(r.Active > 0 ? Fmt.Short(r.Active) : "–");
                 item.SubItems.Add(r.Running > 0 ? Fmt.Short(r.Running) : "–");
-                item.SubItems.Add(r.Active > 0 && !r.Hidden ? Fmt.Pct(r.Ratio) : "–");
+                item.SubItems.Add(r.Active > 0 ? Fmt.Pct(r.Ratio) : "–");
                 list.Items.Add(item);
                 if (keepSet.Contains(r.Key)) item.Selected = true;
             }
@@ -645,8 +738,8 @@ namespace UsageTracker.Ui
             timeline.Selected = key;
             timeline.Invalidate();
 
-            string who = key == null ? "전체" : catalog.DisplayName(key);
-            Color color = key == null ? Color.Empty : theme.SlotColor(catalog.SlotOf(key));
+            string who = key == null ? "전체" : NameOf(key);
+            Color color = key == null ? Color.Empty : ColorOf(key);
             double[] h = null;
             if (key == null) h = sum.HourlyAll; else sum.HourlyActive.TryGetValue(key, out h);
             hourly.SetData(h, "시간대별 · " + who + (period == Period.Day ? "" : " (기간 합계)"), color);
@@ -704,11 +797,29 @@ namespace UsageTracker.Ui
             if (key == null)
             {
                 AddTitle(null, "기간 요약");
-                AddField("앱", rows.Count + "개");
+                AddField("앱", appCount + "개" + (hiddenInPeriod.Count > 0 ? " (숨김 " + hiddenInPeriod.Count + "개 별도)" : ""));
                 AddField("앱 활성 합계", Fmt.Long(rows.Sum(r => r.Active)));
                 AddField("PC 켜짐", Fmt.Long(sum.PcOn));
                 AddField("실제 사용", Fmt.Long(sum.PcUsed));
                 AddNote("목록에서 앱을 고르면 자세한 정보와 시간대별 사용이 보여요.");
+            }
+            else if (key == HiddenKey)
+            {
+                var row = rows.FirstOrDefault(r => r.Key == HiddenKey);
+                AddTitle(null, "숨긴 앱");
+                if (row != null)
+                {
+                    AddField("이 기간 활성", Fmt.Long(row.Active));
+                    AddField("이 기간 실행", row.Running > 0 ? Fmt.Long(row.Running) : "–");
+                    AddField("비율", row.Active > 0 ? Fmt.Pct(row.Ratio) : "–");
+                }
+                AddHeader("숨긴 항목 " + hiddenInPeriod.Count + "개");
+                foreach (var k in hiddenInPeriod.OrderByDescending(k => { double v; sumKeys.Active.TryGetValue(k, out v); return v; }))
+                {
+                    double a; sumKeys.Active.TryGetValue(k, out a);
+                    AddField(catalog.DisplayName(k), Fmt.Long(a));
+                }
+                AddNote("두 번 누르거나 '숨긴 항목 보기'를 켜면 하나씩 볼 수 있어요. 오른쪽 클릭으로 모두 숨김 해제하거나 기록을 지울 수 있어요.");
             }
             else
             {

@@ -72,6 +72,7 @@ namespace UsageTracker
                 { "T21 소리 판정 기억 (잠깐의 정적)", T21_AudioMemory },
                 { "T22 날짜별 활성 시간", T22_Daily },
                 { "T23 시작 메뉴 바로가기 만들기·유지", T23_Shortcut },
+                { "T24 읽기 캐시: 파일이 바뀌면 다시 읽음", T24_ReaderCache },
             };
             foreach (var kv in tests)
             {
@@ -132,7 +133,12 @@ namespace UsageTracker
                     var segs = UsageReader.Read(dir, r.Item2, end, end.AddDays(1), false);
                     var sum = UsageReader.Summarize(segs, id => id, r.Item2, end);
                     sw.Stop();
-                    sb.AppendFormat("{0}: {1:N0}ms (구간 {2:N0}개, 앱 {3}개)\r\n", r.Item1, sw.ElapsedMilliseconds, segs.Count, sum.Active.Count);
+                    var sw2 = Stopwatch.StartNew();   // 두 번째: 해석 캐시 사용 (화면 갱신 상황)
+                    segs = UsageReader.Read(dir, r.Item2, end, end.AddDays(1), false);
+                    UsageReader.Summarize(segs, id => id, r.Item2, end);
+                    sw2.Stop();
+                    sb.AppendFormat("{0}: 처음 {1:N0}ms, 다시 {2:N0}ms (구간 {3:N0}개, 앱 {4}개)\r\n",
+                        r.Item1, sw.ElapsedMilliseconds, sw2.ElapsedMilliseconds, segs.Count, sum.Active.Count);
                 }
                 sb.AppendFormat("최대 메모리(GC 힙): {0:N1}MB\r\n", GC.GetTotalMemory(false) / 1048576.0);
             }
@@ -510,6 +516,24 @@ namespace UsageTracker
             True("같으면 다시 만들지 않는다", !StartMenu.Ensure(exe, lnk));
             string other = Path.Combine(Environment.SystemDirectory, "calc.exe");
             True("exe를 옮기면 고친다", StartMenu.Ensure(other, lnk) && string.Equals(StartMenu.Target(lnk), other, StringComparison.OrdinalIgnoreCase));
+        }
+
+        static void T24_ReaderCache()
+        {
+            var env = NewEnv(); string dir = NewDir();
+            var t = NewTracker(env, dir);
+            env.At(60); t.Flush();
+            var s1 = Sum(dir, env.Base);
+            var s2 = Sum(dir, env.Base);   // 캐시에서
+            Near("같은 파일은 같은 결과", Get(s1.Active, "a.exe"), Get(s2.Active, "a.exe"));
+            System.Threading.Thread.Sleep(20);
+            env.At(120); env.Fg = "b.exe"; t.OnForeground((IntPtr)1);
+            env.At(180); t.Shutdown();     // 파일에 덧붙임 → 크기가 바뀌므로 다시 읽어야 한다
+            var s3 = Sum(dir, env.Base);
+            Near("덧붙인 뒤 a", 120, Get(s3.Active, "a.exe"));
+            Near("덧붙인 뒤 b", 60, Get(s3.Active, "b.exe"));
+            DataMaintenance.DeleteApps(dir, new[] { "b.exe" });   // 다시 쓰기 → 다시 읽어야 한다
+            Near("삭제 뒤 b 없음", 0, Get(Sum(dir, env.Base).Active, "b.exe"));
         }
 
         static void T15_ExcludeRunning()

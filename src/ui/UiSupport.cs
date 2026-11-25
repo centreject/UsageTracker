@@ -129,6 +129,7 @@ namespace UsageTracker.Ui
             try
             {
                 if (key == AppResolver.DesktopId) img = Scale(ShellIcon(34));              // shell32 34 = 바탕화면
+                else if (key == "::hidden") img = Scale(ShellIcon(4));                     // shell32 4 = 폴더 (숨긴 앱 모음)
                 else if (!string.IsNullOrEmpty(path) && File.Exists(path))
                 {
                     using (var ico = Icon.ExtractAssociatedIcon(path)) img = Scale(ico.ToBitmap());

@@ -50,29 +50,23 @@ namespace UsageTracker
             var nextMonth = lastMonth.AddMonths(1);
             if (nextMonth > nowMonth) nextMonth = nowMonth;
             if (nextMonth > lastMonth) lastMonth = nextMonth;
+            var openStarts = new HashSet<long>();
             for (; month <= lastMonth; month = month.AddMonths(1))
             {
-                string f = SessionWriter.FileFor(dir, month);
-                if (!File.Exists(f)) continue;
-                foreach (var line in ReadLinesShared(f))
+                var pf = Parse(SessionWriter.FileFor(dir, month));
+                if (pf == null) continue;
+                if (pf.LastFlush > lastFlush) lastFlush = pf.LastFlush;
+                foreach (var r in pf.Records)
                 {
-                    var p = line.Split('\t');
-                    DateTime s, e;
-                    if (p.Length == 4 && p[0].Length == 1 && "ARPU".IndexOf(p[0][0]) >= 0
-                        && SessionWriter.TryParse(p[1], out s) && SessionWriter.TryParse(p[2], out e))
+                    if (r.Open)
                     {
-                        open.Remove(p[0] + "|" + p[1] + "|" + p[3]);
-                        Add(result, p[0][0], p[3], s, e, from, to);
+                        open[OpenKey(r.Kind, r.Start, r.App)] = new RawSeg { Kind = r.Kind, AppId = r.App, Start = r.Start };
+                        openStarts.Add(r.Start.Ticks);
+                        continue;
                     }
-                    else if (p.Length == 4 && p[0] == "O" && p[1].Length == 1 && SessionWriter.TryParse(p[2], out s))
-                    {
-                        open[p[1] + "|" + p[2] + "|" + p[3]] = new RawSeg { Kind = p[1][0], AppId = p[3], Start = s };
-                    }
-                    else if (p.Length == 2 && p[0] == "F" && SessionWriter.TryParse(p[1], out s) && s > lastFlush)
-                    {
-                        lastFlush = s;
-                    }
-                    // 그 밖의 줄(버전, 쓰다 만 줄)은 무시
+                    // 열린 구간의 짝(같은 종류·시작·앱의 끝난 구간)이면 열린 목록에서 뺀다
+                    if (openStarts.Count > 0 && openStarts.Contains(r.Start.Ticks)) open.Remove(OpenKey(r.Kind, r.Start, r.App));
+                    Add(result, r.Kind, r.App, r.Start, r.End, from, to);
                 }
             }
 
@@ -94,6 +88,69 @@ namespace UsageTracker
             if (s < from) s = from;
             if (e > to) e = to;
             if (e > s) list.Add(new RawSeg { Kind = kind, AppId = app, Start = s, End = e });
+        }
+
+        static string OpenKey(char kind, DateTime start, string app)
+        {
+            return kind.ToString() + start.Ticks + "|" + app;
+        }
+
+        // ---------- 월 파일 해석 캐시 (화면 모드 프로세스 안에서만 산다) ----------
+
+        sealed class Rec
+        {
+            public char Kind;        // A·R·P·U (열린 구간이면 그 종류)
+            public bool Open;        // 'O' 줄
+            public DateTime Start, End;
+            public string App;
+        }
+
+        sealed class ParsedFile
+        {
+            public long Length;
+            public DateTime WriteTime;
+            public readonly List<Rec> Records = new List<Rec>();
+            public DateTime LastFlush = DateTime.MinValue;
+        }
+
+        static readonly Dictionary<string, ParsedFile> cache = new Dictionary<string, ParsedFile>(StringComparer.OrdinalIgnoreCase);
+        static readonly Dictionary<string, string> appIds = new Dictionary<string, string>(StringComparer.Ordinal);   // 같은 앱 ID 문자열 공유
+
+        /// <summary>
+        /// 월 파일을 해석한다. 크기·수정 시각이 그대로면 이전 결과를 쓴다 (지난달 파일은 바뀌지 않으므로
+        /// 1분마다 갱신해도 이번 달 파일만 다시 읽는다). 파일이 없으면 null.
+        /// </summary>
+        static ParsedFile Parse(string path)
+        {
+            var fi = new FileInfo(path);
+            if (!fi.Exists) { cache.Remove(path); return null; }
+            ParsedFile pf;
+            if (cache.TryGetValue(path, out pf) && pf.Length == fi.Length && pf.WriteTime == fi.LastWriteTimeUtc) return pf;
+
+            pf = new ParsedFile { Length = fi.Length, WriteTime = fi.LastWriteTimeUtc };
+            foreach (var line in ReadLinesShared(path))
+            {
+                var p = line.Split('\t');
+                DateTime s, e;
+                if (p.Length == 4 && p[0].Length == 1 && "ARPU".IndexOf(p[0][0]) >= 0
+                    && SessionWriter.TryParse(p[1], out s) && SessionWriter.TryParse(p[2], out e))
+                    pf.Records.Add(new Rec { Kind = p[0][0], Start = s, End = e, App = Intern(p[3]) });
+                else if (p.Length == 4 && p[0] == "O" && p[1].Length == 1 && SessionWriter.TryParse(p[2], out s))
+                    pf.Records.Add(new Rec { Kind = p[1][0], Open = true, Start = s, App = Intern(p[3]) });
+                else if (p.Length == 2 && p[0] == "F" && SessionWriter.TryParse(p[1], out s) && s > pf.LastFlush)
+                    pf.LastFlush = s;
+                // 그 밖의 줄(버전, 쓰다 만 줄)은 무시
+            }
+            cache[path] = pf;
+            return pf;
+        }
+
+        static string Intern(string s)
+        {
+            string v;
+            if (appIds.TryGetValue(s, out v)) return v;
+            appIds[s] = s;
+            return s;
         }
 
         /// <summary>기록 모드가 덧붙여 쓰는 중에도 읽을 수 있게 공유 모드로 연다.</summary>
@@ -174,23 +231,19 @@ namespace UsageTracker
         {
             var set = new HashSet<string>(ids, StringComparer.OrdinalIgnoreCase);
             var month = new DateTime(now.Year, now.Month, 1);
+            // 해석 캐시를 쓰므로, 화면에 보이는 기간의 파일은 다시 읽지 않는다
             for (int i = 0; i < 24; i++, month = month.AddMonths(-1))
             {
-                string f = SessionWriter.FileFor(dir, month);
-                if (!File.Exists(f)) continue;
+                var pf = Parse(SessionWriter.FileFor(dir, month));
+                if (pf == null) continue;
                 DateTime best = DateTime.MinValue;
-                var open = new HashSet<string>(StringComparer.Ordinal);
-                foreach (var line in ReadLinesShared(f))
+                var open = new HashSet<long>();
+                foreach (var r in pf.Records)
                 {
-                    var p = line.Split('\t');
-                    DateTime e;
-                    if (p.Length == 4 && p[0] == "A" && set.Contains(p[3]) && SessionWriter.TryParse(p[2], out e))
-                    {
-                        if (e > best) best = e;
-                        open.Remove(p[1] + "|" + p[3]);
-                    }
-                    else if (p.Length == 4 && p[0] == "O" && p[1] == "A" && set.Contains(p[3]))
-                        open.Add(p[2] + "|" + p[3]);
+                    if (r.Kind != 'A' || !set.Contains(r.App)) continue;
+                    if (r.Open) { open.Add(r.Start.Ticks); continue; }
+                    if (r.End > best) best = r.End;
+                    open.Remove(r.Start.Ticks);
                 }
                 if (open.Count > 0 && i == 0) return now;
                 if (best > DateTime.MinValue) return best;
