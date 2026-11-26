@@ -25,7 +25,9 @@ namespace UsageTracker
         {
             "lockapp.exe", "startmenuexperiencehost.exe", "searchhost.exe", "searchapp.exe",
             "shellexperiencehost.exe", "shellhost.exe", "textinputhost.exe", "logonui.exe",
-            "consent.exe", "dwm.exe", "csrss.exe", "winlogon.exe"
+            "consent.exe", "dwm.exe", "csrss.exe", "winlogon.exe",
+            // UWP 틀: 안쪽 앱을 찾으면 그 앱으로 바뀌고, 못 찾을 때(앱이 막 뜨는 중)만 여기 걸린다
+            "applicationframehost.exe"
         };
 
         // explorer.exe 창 중 앱으로 치지 않는 것 (작업 표시줄, 작업 전환 등)

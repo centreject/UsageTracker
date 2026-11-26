@@ -10,3 +10,5 @@ testdata/
 testdata-*/
 dist/
 testdata-health/
+testdata-manual/
+testdata-idle-*/
