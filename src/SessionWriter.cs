@@ -111,14 +111,17 @@ namespace UsageTracker
             }
             Buf(now).Append("F\t").Append(Fmt(now)).Append("\r\n");
 
-            foreach (var kv in pending)
+            // 파일마다 쓴 즉시 버퍼에서 뺀다. 중간 파일에서 실패해도 이미 쓴 파일을 다음 저장 때 다시 쓰지 않게
+            foreach (var f in new List<string>(pending.Keys))
             {
-                if (kv.Value.Length == 0) continue;
-                bool isNew = !File.Exists(kv.Key);
-                if (isNew) kv.Value.Insert(0, "V\t" + FormatVersion + "\r\n");
-                File.AppendAllText(kv.Key, kv.Value.ToString(), new UTF8Encoding(false));
+                string text = pending[f].ToString();
+                if (text.Length > 0)
+                {
+                    if (!File.Exists(f)) text = "V\t" + FormatVersion + "\r\n" + text;
+                    File.AppendAllText(f, text, new UTF8Encoding(false));
+                }
+                pending.Remove(f);
             }
-            pending.Clear();
         }
 
         /// <summary>비정상 종료로 닫히지 않은 구간을 마지막 저장 시점에서 닫는다.</summary>

@@ -85,6 +85,7 @@ namespace UsageTracker
                 { "T34 마지막 사용 정확도·장기 미실행 복구", T34_LastUsedAndLongGapRecover },
                 { "T35 UWP 지연 인식·보조 모니터 최대화 판정", T35_UwpRetryAndFullscreen },
                 { "T36 IPC 서명 검증·절전 중복 방지", T36_IpcAndSuspend },
+                { "T37 저장 중간 실패 후 재시도 시 중복 없음", T37_FlushPartialFailure },
             };
             foreach (var kv in tests)
             {
@@ -824,6 +825,30 @@ namespace UsageTracker
             True("첫 절전 전환만 true", t.SetSuspended(true) && !t.SetSuspended(true));
             True("첫 복귀 전환만 true", t.SetSuspended(false) && !t.SetSuspended(false));
             t.Shutdown();
+        }
+
+        static void T37_FlushPartialFailure()
+        {
+            // 3월·4월 파일에 쓸 게 있는데 4월 파일 자리가 폴더라 쓰기가 실패하는 상황
+            string dir = NewDir();
+            var w = new SessionWriter(dir);
+            var mar = new DateTime(2026, 3, 31, 23, 0, 0);
+            var apr = new DateTime(2026, 4, 1, 0, 10, 0);
+            w.AddClosed(new Segment { Kind = 'A', AppId = "a.exe", Start = mar }, mar.AddMinutes(10));
+            w.AddClosed(new Segment { Kind = 'A', AppId = "b.exe", Start = apr }, apr.AddMinutes(10));
+            string aprFile = SessionWriter.FileFor(dir, apr);
+            Directory.CreateDirectory(aprFile);
+            bool threw = false;
+            try { w.Flush(apr.AddMinutes(10), new Segment[0]); } catch { threw = true; }
+            True("4월 파일 쓰기 실패", threw);
+
+            Directory.Delete(aprFile);
+            w.Flush(apr.AddMinutes(15), new Segment[0]);   // 재시도
+            Near("3월 활성 600초 (중복 없음)", 600, Get(Sum(dir, mar).Active, "a.exe"));
+            Near("4월 활성 600초", 600, Get(Sum(dir, apr).Active, "b.exe"));
+            int headers = 0;
+            foreach (var line in File.ReadAllLines(aprFile, Encoding.UTF8)) if (line.StartsWith("V\t")) headers++;
+            True("4월 파일 V 줄 1개 (실제 " + headers + "개)", headers == 1);
         }
     }
 }
