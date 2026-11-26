@@ -64,6 +64,7 @@ namespace UsageTracker.Ui
         readonly Settings settings;
         readonly NumericUpDown idle = new NumericUpDown { Minimum = 1, Maximum = 120, Width = 70 };
         readonly CheckBox autoStart = new CheckBox { Text = "Windows 시작 시 실행", AutoSize = true };
+        bool autoStartInitially;
 
         /// <summary>전체 초기화나 제거 준비를 했으면 true (메인 창이 다시 읽거나 닫는다).</summary>
         public bool DataChanged, Uninstalled;
@@ -97,11 +98,16 @@ namespace UsageTracker.Ui
             root.Controls.Add(idleRow);
             root.Controls.Add(Note("소리가 나거나 전체 화면이면 입력이 없어도 사용 중으로 봐요."));
 
-            autoStart.Checked = settings.AutoStart;
+            // 실제로 자동 시작되는지 보여 준다: Windows 설정 → 시작 앱에서 꺼 두었으면 체크 해제로 보인다
+            bool winOff = !devMode && AutoStart.DisabledInWindows();
+            autoStart.Checked = settings.AutoStart && !winOff;
+            autoStartInitially = autoStart.Checked;
             autoStart.Enabled = !devMode;
             autoStart.Margin = new Padding(0, 8, 0, 0);
             root.Controls.Add(autoStart);
             if (devMode) root.Controls.Add(Note("시험용 데이터 폴더로 실행 중이라 자동 시작은 바꿀 수 없어요."));
+            else if (winOff && settings.AutoStart)
+                root.Controls.Add(Note("Windows 설정 → 앱 → 시작 앱에서 꺼 둔 상태예요. 여기서 켜고 저장하면 다시 켜져요."));
 
             root.Controls.Add(Header("데이터", bold));
             var folder = new LinkLabel { Text = dataDir, AutoSize = true, MaximumSize = new Size(420, 0), Margin = new Padding(0, 0, 0, 4) };
@@ -148,6 +154,9 @@ namespace UsageTracker.Ui
             settings.IdleMinutes = (int)idle.Value;
             if (!devMode) settings.AutoStart = autoStart.Checked;
             settings.Save();
+            // 사용자가 이 창에서 직접 켰으면 Windows 쪽 "사용 안 함"도 다시 켠다
+            if (!devMode && autoStart.Checked && !autoStartInitially)
+                AutoStart.Apply(true, Application.ExecutablePath, true);
             if (!Recorder.Send(Tray.CmdReloadSettings) && !devMode)
                 AutoStart.Apply(settings.AutoStart, Application.ExecutablePath);   // 기록 모드가 꺼져 있으면 직접
         }

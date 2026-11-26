@@ -5,6 +5,7 @@ using System.Text;
 namespace UsageTracker
 {
     // Win32 API 선언 모음. WinForms 없이 기록 모드를 돌리기 위해 필요한 것만 둔다.
+    // 창 관련 함수는 모두 유니코드(W) 판을 쓴다. DefWindowProc가 ANSI(A)면 창 제목이 첫 글자만 남는다 (v0.8.3에서 수정).
     static class Native
     {
         public delegate IntPtr WndProc(IntPtr hwnd, uint msg, IntPtr wParam, IntPtr lParam);
@@ -110,10 +111,10 @@ namespace UsageTracker
         [DllImport("user32.dll")] public static extern bool GetMonitorInfo(IntPtr mon, ref MONITORINFO mi);
         [DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern ushort RegisterClassEx(ref WNDCLASSEX wc);
         [DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern IntPtr CreateWindowEx(uint exStyle, string cls, string title, uint style, int x, int y, int w, int h, IntPtr parent, IntPtr menu, IntPtr inst, IntPtr param);
-        [DllImport("user32.dll")] public static extern IntPtr DefWindowProc(IntPtr hwnd, uint msg, IntPtr wParam, IntPtr lParam);
-        [DllImport("user32.dll")] public static extern int GetMessage(out MSG msg, IntPtr hwnd, uint min, uint max);
+        [DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern IntPtr DefWindowProc(IntPtr hwnd, uint msg, IntPtr wParam, IntPtr lParam);
+        [DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern int GetMessage(out MSG msg, IntPtr hwnd, uint min, uint max);
         [DllImport("user32.dll")] public static extern bool TranslateMessage(ref MSG msg);
-        [DllImport("user32.dll")] public static extern IntPtr DispatchMessage(ref MSG msg);
+        [DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern IntPtr DispatchMessage(ref MSG msg);
         [DllImport("user32.dll")] public static extern void PostQuitMessage(int code);
         [DllImport("user32.dll")] public static extern UIntPtr SetTimer(IntPtr hwnd, IntPtr id, uint ms, IntPtr proc);
         [DllImport("user32.dll")] public static extern bool KillTimer(IntPtr hwnd, IntPtr id);
@@ -125,7 +126,7 @@ namespace UsageTracker
         [DllImport("user32.dll")] public static extern bool DestroyMenu(IntPtr menu);
         [DllImport("user32.dll")] public static extern bool GetCursorPos(out POINT pt);
         [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr hwnd);
-        [DllImport("user32.dll")] public static extern bool PostMessage(IntPtr hwnd, uint msg, IntPtr wParam, IntPtr lParam);
+        [DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern bool PostMessage(IntPtr hwnd, uint msg, IntPtr wParam, IntPtr lParam);
         [DllImport("shell32.dll", CharSet = CharSet.Unicode)] public static extern bool Shell_NotifyIcon(uint msg, ref NOTIFYICONDATA data);
         [DllImport("shell32.dll", CharSet = CharSet.Unicode)] public static extern IntPtr ShellExecute(IntPtr hwnd, string op, string file, string args, string dir, int show);
         [DllImport("wtsapi32.dll")] public static extern bool WTSRegisterSessionNotification(IntPtr hwnd, int flags);

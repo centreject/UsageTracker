@@ -8,7 +8,7 @@ New-Item -ItemType Directory -Force (Split-Path $Out) | Out-Null
 if (-not (Test-Path $Out)) { 'time,pid,privateWsMB,wsMB,privateBytesMB,cpuSec,writeOps,readOps,handles,threads' | Set-Content $Out -Encoding ascii }
 $end = (Get-Date).AddHours($Hours)
 while ((Get-Date) -lt $end) {
-    $h = [UTM.U]::FindWindow('UsageTracker.Recorder', [NullString]::Value)
+    $h = [UTM.U]::FindWindow('UsageTracker.Recorder', 'UsageTracker.Recorder|' + (Join-Path $env:LOCALAPPDATA 'UsageTracker').ToLowerInvariant())
     $rpid = 0
     if ($h -ne [IntPtr]::Zero) { [void][UTM.U]::GetWindowThreadProcessId($h, [ref]$rpid) }
     $t = Get-Date -Format 'yyyy-MM-dd HH:mm:ss'

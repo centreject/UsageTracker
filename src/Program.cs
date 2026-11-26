@@ -14,7 +14,7 @@ namespace UsageTracker
     /// </summary>
     static class Program
     {
-        static readonly IntPtr TimerTickId = (IntPtr)1, TimerIdleId = (IntPtr)2, TimerFlushId = (IntPtr)3, TimerPauseId = (IntPtr)4;
+        static readonly IntPtr TimerTickId = (IntPtr)1, TimerIdleId = (IntPtr)2, TimerFlushId = (IntPtr)3, TimerPauseId = (IntPtr)4, TimerHealthId = (IntPtr)5;
         const uint IdlePollMs = 2000;
 
         static IntPtr hwnd;
@@ -81,7 +81,9 @@ namespace UsageTracker
             }
 
             bool created;
-            using (var mutex = new Mutex(true, "Local\\UsageTracker.Recorder", out created))
+            // 중복 실행 방지는 데이터 폴더별로: 시험용 폴더(--data)로 띄운 기록 모드가 실제 기록 모드와 함께 돌 수 있게
+            string mutexName = manageAutoStart ? "Local\\UsageTracker.Recorder" : "Local\\UsageTracker.Recorder." + Fnv(dataDir.TrimEnd('\\').ToLowerInvariant());
+            using (var mutex = new Mutex(true, mutexName, out created))
             {
                 if (!created) return 1;   // 이미 실행 중
                 Directory.CreateDirectory(dataDir);
@@ -118,7 +120,10 @@ namespace UsageTracker
                 UpdateTip();
                 Native.SetTimer(hwnd, TimerTickId, tickMs, IntPtr.Zero);
                 Native.SetTimer(hwnd, TimerFlushId, flushMs, IntPtr.Zero);
+                Native.SetTimer(hwnd, TimerHealthId, 3600 * 1000, IntPtr.Zero);   // 자원 사용 기록 (1시간마다)
+                Health.Init(dataDir);
                 Native.TrimMemory();
+                Health.Log("start");   // 시작 직후 메모리 정리 뒤에 기록 (정리 전 값은 일시적)
 
                 Native.MSG msg;
                 while (Native.GetMessage(out msg, IntPtr.Zero, 0, 0) > 0)
@@ -128,6 +133,7 @@ namespace UsageTracker
                 }
 
                 Safe("shutdown", tracker.Shutdown);
+                Health.Log("stop");
                 Native.UnhookWinEvent(hook);
                 Native.WTSUnRegisterSessionNotification(hwnd);
                 tray.Remove();
@@ -136,6 +142,13 @@ namespace UsageTracker
         }
 
         static string dataDir;
+
+        static string Fnv(string s)
+        {
+            uint h = 2166136261;
+            foreach (char c in s) { h ^= c; h *= 16777619; }
+            return h.ToString("x8");
+        }
 
         // 별도 메서드로 둬서, 기록 모드에서는 화면 모드 코드(WinForms)를 JIT하지도 불러오지도 않게 한다
         [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
@@ -212,8 +225,8 @@ namespace UsageTracker
 
                     case Native.WM_POWERBROADCAST:
                         int pbt = wParam.ToInt32();
-                        if (pbt == Native.PBT_APMSUSPEND) tracker.SetSuspended(true);
-                        else if (pbt == Native.PBT_APMRESUMEAUTOMATIC || pbt == Native.PBT_APMRESUMESUSPEND) tracker.SetSuspended(false);
+                        if (pbt == Native.PBT_APMSUSPEND) { tracker.SetSuspended(true); Health.Log("suspend"); }
+                        else if (pbt == Native.PBT_APMRESUMEAUTOMATIC || pbt == Native.PBT_APMRESUMESUSPEND) { tracker.SetSuspended(false); Health.Log("resume"); }
                         UpdateIdleTimer();
                         UpdateTip();
                         return (IntPtr)1;
@@ -243,7 +256,7 @@ namespace UsageTracker
                         return (IntPtr)1;
 
                     case Native.WM_ENDSESSION:
-                        if (wParam != IntPtr.Zero) { tracker.Shutdown(); tray.Remove(); }
+                        if (wParam != IntPtr.Zero) { tracker.Shutdown(); Health.Log("logoff"); tray.Remove(); }
                         return IntPtr.Zero;
                 }
                 if (msg == taskbarCreated && taskbarCreated != 0)
@@ -274,6 +287,10 @@ namespace UsageTracker
             {
                 tracker.Flush();
                 Native.TrimMemory();
+            }
+            else if (id == TimerHealthId)
+            {
+                Health.Log("hour");
             }
             else if (id == TimerPauseId)
             {
@@ -313,7 +330,7 @@ namespace UsageTracker
                     if (!manageAutoStart) break;
                     settings.AutoStart = !settings.AutoStart;
                     settings.Save();
-                    AutoStart.Apply(settings.AutoStart, exePath);
+                    AutoStart.Apply(settings.AutoStart, exePath, true);   // 사용자가 직접 고름
                     break;
                 case Tray.CmdErrors:
                     if (ErrorLog.FilePath != null && File.Exists(ErrorLog.FilePath))
@@ -329,14 +346,14 @@ namespace UsageTracker
                     LaunchUi(" --settings");
                     break;
                 case Tray.CmdReloadSettings:
+                {
+                    bool wasAuto = settings.AutoStart;
                     settings = new Settings(dataDir);
                     if (idleSecOverride < 0) tracker.IdleThresholdMs = settings.IdleMinutes * 60 * 1000;
-                    if (manageAutoStart)
-                {
-                    AutoStart.Apply(settings.AutoStart, exePath);
-                    StartMenu.Ensure(exePath);   // 시작 메뉴에서 통계 창을 열 수 있게
-                }
+                    // 설정 창에서 자동 시작을 꺼짐→켜짐으로 바꿨을 때만 Windows 쪽 "사용 안 함"을 덮어쓴다
+                    if (manageAutoStart) AutoStart.Apply(settings.AutoStart, exePath, settings.AutoStart && !wasAuto);
                     break;
+                }
                 case Tray.CmdExit:
                     Native.PostQuitMessage(0);
                     break;

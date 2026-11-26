@@ -1,4 +1,4 @@
-# Automated event test: sends pause/resume, suspend/resume, time-change and lock/unlock messages
+﻿# Automated event test: sends pause/resume, suspend/resume, time-change and lock/unlock messages
 # to a recorder running on a throwaway data folder, then prints the recorded segments.
 # Usage: .\tools\test-events.ps1
 param([string]$Data = "$PSScriptRoot\..\testdata-events")
@@ -9,7 +9,7 @@ Add-Type -Namespace TE -Name U -MemberDefinition '[DllImport("user32.dll", CharS
 
 $p = Start-Process $exe -ArgumentList "--data=`"$Data`" --tick=2 --flush=60 --idle=0" -PassThru
 Start-Sleep 3
-$h = [TE.U]::FindWindow('UsageTracker.Recorder', [NullString]::Value)
+$h = [TE.U]::FindWindow('UsageTracker.Recorder', 'UsageTracker.Recorder|' + [IO.Path]::GetFullPath($Data).TrimEnd('\').ToLowerInvariant())
 if ($h -eq [IntPtr]::Zero) { throw 'recorder window not found' }
 function Send-Msg($name, [uint32]$msg, [int64]$w) {
     "{0}  {1}" -f (Get-Date -Format 'HH:mm:ss'), $name

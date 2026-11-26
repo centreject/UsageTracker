@@ -1,4 +1,4 @@
-# Runs the recorder against a throwaway data folder with short intervals and samples memory/CPU.
+﻿# Runs the recorder against a throwaway data folder with short intervals and samples memory/CPU.
 # Usage: .\tools\test-run.ps1 [-Seconds 150] [-Kill]   (-Kill: end with Stop-Process to test crash recovery)
 param([int]$Seconds = 150, [switch]$Kill, [string]$Data = "$PSScriptRoot\..\testdata", [string]$Extra = '--tick=5 --flush=20 --idle=20')
 $exe = Resolve-Path "$PSScriptRoot\..\bin\UsageTracker.exe"
@@ -20,7 +20,7 @@ $cpu1 = $g.TotalProcessorTime; $el = ((Get-Date) - $t0).TotalSeconds
 if ($Kill) { Stop-Process -Id $p.Id; "killed" }
 else {
     Add-Type -Namespace W -Name U -MemberDefinition '[DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern System.IntPtr FindWindow(string c, string t); [DllImport("user32.dll")] public static extern bool PostMessage(System.IntPtr h, uint m, System.IntPtr w, System.IntPtr l);'
-    $h = [W.U]::FindWindow('UsageTracker.Recorder', [NullString]::Value)   # plain $null would be passed as ""
+    $h = [W.U]::FindWindow('UsageTracker.Recorder', 'UsageTracker.Recorder|' + [IO.Path]::GetFullPath($Data).TrimEnd('\').ToLowerInvariant())   # only our own data folder's recorder
     [void][W.U]::PostMessage($h, 0x0010, [IntPtr]::Zero, [IntPtr]::Zero)
     $p.WaitForExit(5000) | Out-Null
     "closed gracefully: $($p.HasExited)"
