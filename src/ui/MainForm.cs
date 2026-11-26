@@ -44,11 +44,13 @@ namespace UsageTracker.Ui
         readonly ImageList images = new ImageList { ColorDepth = ColorDepth.Depth32Bit };
         Period period = Period.Day;
         DateTime anchor = DateTime.Today;
-        UsageSummary sum, sumRaw;
+        UsageSummary sum;
+        Dictionary<string, double> rawActive = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase);
         List<Row> rows = new List<Row>();
         int sortCol = 1;
         bool sortAsc;
         bool recorderAlive;
+        bool uninstalled;
 
         // 컨트롤
         readonly RadioButton[] tabs = new RadioButton[4];
@@ -136,7 +138,7 @@ namespace UsageTracker.Ui
             if (prefs.Maximized) WindowState = FormWindowState.Maximized;
             sortCol = prefs.SortCol;
             sortAsc = prefs.SortAsc;
-            FormClosing += (s, e) => SavePrefs();
+            FormClosing += (s, e) => { if (!uninstalled) SavePrefs(); };
 
             Load += (s, e) =>
             {
@@ -208,6 +210,7 @@ namespace UsageTracker.Ui
                 {
                     var r = (RadioButton)s;
                     r.ForeColor = r.Checked ? Color.White : theme.Text;
+                    r.FlatAppearance.MouseOverBackColor = r.Checked ? theme.Accent : theme.Track;
                     if (r.Checked) { period = (Period)r.Tag; RefreshData(); }
                 };
                 rb.ForeColor = rb.Checked ? Color.White : theme.Text;
@@ -226,7 +229,7 @@ namespace UsageTracker.Ui
             filterBar.Controls.Add(favOnlyBox);
             searchBox.Width = 200;
             searchBox.Margin = new Padding(0, 4, 0, 0);
-            searchBox.TextChanged += (s, e) => { search = searchBox.Text.Trim(); Populate(SelectedKeys()); };
+            searchBox.TextChanged += (s, e) => { search = searchBox.Text.Trim(); Populate(SelectedKeys()); OnSelection(); };
             searchBox.KeyDown += (s, e) => { if (e.KeyCode == Keys.Escape) { searchBox.Clear(); e.Handled = e.SuppressKeyPress = true; } };
             searchBox.HandleCreated += (s, e) => SendMessage(searchBox.Handle, 0x1501 /*EM_SETCUEBANNER*/, (IntPtr)1, "앱 검색 (Ctrl+F)");
             filterBar.Controls.Add(searchBox);
@@ -294,6 +297,9 @@ namespace UsageTracker.Ui
             list.LostFocus += (s, e) => list.Invalidate();
             list.DoubleClick += (s, e) =>
             {
+                var pt = list.PointToClient(Cursor.Position);
+                var hit = list.HitTest(pt);
+                if (hit.Item != null && IsOnStar(hit.Item, pt.X)) return;   // 별 자리를 빠르게 두 번 눌러도 이름 바꾸기 창을 띄우지 않는다
                 var k = SelectedKeys();
                 if (k.Count == 1 && k[0] == HiddenKey) showHiddenBox.Checked = true;   // 숨긴 앱 펼치기
                 else Rename();
@@ -304,11 +310,7 @@ namespace UsageTracker.Ui
                 // 이름 칸의 별 자리를 누르면 즐겨찾기 켜고 끄기
                 var hit = list.HitTest(e.Location);
                 if (hit.Item == null || e.Button != MouseButtons.Left) return;
-                var row = (Row)hit.Item.Tag;
-                if (row.Key == HiddenKey) return;
-                var b = hit.Item.GetBounds(ItemBoundsPortion.Entire);
-                int x0 = b.X + 4 + images.ImageSize.Width + 4;
-                if (e.X >= x0 && e.X <= x0 + StarWidth) ToggleFavorite(new List<string> { row.Key });
+                if (IsOnStar(hit.Item, e.X)) ToggleFavorite(new List<string> { ((Row)hit.Item.Tag).Key });
             };
             list.SmallImageList = images;
             list.BackColor = theme.Back;
@@ -397,6 +399,15 @@ namespace UsageTracker.Ui
         }
 
         int StarWidth { get { return images.ImageSize.Width; } }
+
+        bool IsOnStar(ListViewItem item, int x)
+        {
+            var row = (Row)item.Tag;
+            if (row.Key == HiddenKey) return false;
+            var b = item.GetBounds(ItemBoundsPortion.Entire);
+            int x0 = b.X + 4 + images.ImageSize.Width + 4;
+            return x >= x0 && x <= x0 + StarWidth;
+        }
 
         /// <summary>검색: 표시 이름이나 원래 이름에 검색어가 들어 있으면.</summary>
         bool Matches(Row r)
@@ -599,7 +610,7 @@ namespace UsageTracker.Ui
             {
                 f.StartPosition = FormStartPosition.CenterParent;
                 f.ShowDialog(this);
-                if (f.Uninstalled) { Close(); return; }
+                if (f.Uninstalled) { uninstalled = true; Close(); return; }
                 if (f.DataChanged) RefreshData();
             }
         }
@@ -726,15 +737,21 @@ namespace UsageTracker.Ui
             var now = DateTime.Now;
             catalog = new AppCatalog(dataDir);
             List<RawSeg> segs;
+            bool readFailed = false;
             try { segs = UsageReader.Read(dataDir, from, to, now, recorderAlive); }
-            catch (Exception ex) { segs = new List<RawSeg>(); status.Text = "기록을 읽지 못했어요: " + ex.Message; }
+            catch (Exception ex) { segs = new List<RawSeg>(); readFailed = true; status.Text = "기록을 읽지 못했어요: " + ex.Message; }
             // 숨긴 항목은 "숨긴 앱" 한 줄로 모은다 ("숨긴 항목 보기"를 켜면 하나씩 흐리게).
             // 전체 합계·비율·그래프에는 숨긴 항목도 포함한다.
             sumKeys = UsageReader.Summarize(segs, catalog.KeyOf, from, to);
-            sum = showHidden ? sumKeys : UsageReader.Summarize(segs, ViewKey, from, to);
-            sumRaw = UsageReader.Summarize(segs, id => id, from, to);
             hiddenInPeriod = sumKeys.Active.Keys.Concat(sumKeys.Running.Keys)
                 .Where(k => catalog.IsHidden(k)).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+            sum = (showHidden || hiddenInPeriod.Count == 0) ? sumKeys : UsageReader.Summarize(segs, ViewKey, from, to);
+            rawActive = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase);
+            foreach (var s in segs)
+            {
+                if (s.Kind != 'A') continue;
+                double v; rawActive.TryGetValue(s.AppId, out v); rawActive[s.AppId] = v + s.Seconds;
+            }
 
             var keys = new HashSet<string>(sum.Active.Keys, StringComparer.OrdinalIgnoreCase);
             keys.UnionWith(sum.Running.Keys);
@@ -762,7 +779,7 @@ namespace UsageTracker.Ui
             summary.Text = "PC 켜짐 " + Fmt.Short(sum.PcOn) + "   ·   실제 사용 " + Fmt.Short(sum.PcUsed)
                 + "   ·   앱 활성 합계 " + Fmt.Short(total) + "   ·   앱 " + appCount + "개"
                 + (hiddenInPeriod.Count > 0 ? "   ·   숨김 " + hiddenInPeriod.Count + "개" : "");
-            if (!status.Text.StartsWith("기록을"))
+            if (!readFailed)
                 status.Text = recorderAlive ? "기록 중 · " + now.ToString("HH:mm") + " 기준" : "기록 프로그램이 꺼져 있어요";
             startLink.Visible = !recorderAlive;
             int errors = TodayErrorCount();
@@ -955,9 +972,9 @@ namespace UsageTracker.Ui
                 if (first < DateTime.MaxValue) AddField("처음 기록", first.ToString("yyyy-MM-dd HH:mm"));
                 // CLI는 활성 시간이 없으므로(터미널 창이 가져감) 실행 기록으로 찾는다
                 bool cli = ids.Count > 0 && ids.TrueForAll(id => id.StartsWith("cli:", StringComparison.OrdinalIgnoreCase));
-                var last = UsageReader.LastUsed(dataDir, ids, DateTime.Now, cli ? 'R' : 'A');
+                var last = UsageReader.LastUsed(dataDir, ids, DateTime.Now, cli ? 'R' : 'A', recorderAlive);
                 AddField(cli ? "마지막 실행" : "마지막 사용", last == null ? "–"
-                    : (last.Value >= DateTime.Now.AddMinutes(-1) ? (cli ? "지금 실행 중" : "지금 사용 중") : last.Value.ToString("yyyy-MM-dd HH:mm")));
+                    : (last.Value >= DateTime.Now.AddMinutes(-1) && recorderAlive ? (cli ? "지금 실행 중" : "지금 사용 중") : last.Value.ToString("yyyy-MM-dd HH:mm")));
                 if (cli) AddNote("터미널 안에서 실행된 프로그램이에요. 사용(활성) 시간은 터미널 창에 쌓이고, 여기에는 실행 시간만 기록돼요.");
 
                 if (group)
@@ -965,7 +982,7 @@ namespace UsageTracker.Ui
                     AddHeader("묶인 앱");
                     foreach (var id in ids)
                     {
-                        double a; sumRaw.Active.TryGetValue(id, out a);
+                        double a; rawActive.TryGetValue(id, out a);
                         AddField(catalog.OriginalName(id), Fmt.Long(a));
                     }
                 }
@@ -1041,14 +1058,13 @@ namespace UsageTracker.Ui
             return Send(Tray.CmdFlush);
         }
 
-        /// <summary>기록 모드에 메뉴 명령을 보낸다. 기록 모드가 실행 중이면 true.</summary>
+        /// <summary>기록 모드에 메뉴 명령을 보낸다. 기록 모드가 실행 중이고 응답하면 true.</summary>
         public static bool Send(int cmd)
         {
             IntPtr h = Find();
             if (h == IntPtr.Zero) return false;
             IntPtr r;
-            SendMessageTimeout(h, 0x0111 /*WM_COMMAND*/, (IntPtr)cmd, IntPtr.Zero, 0x2 /*SMTO_ABORTIFHUNG*/, 2000, out r);
-            return true;
+            return SendMessageTimeout(h, 0x0111 /*WM_COMMAND*/, (IntPtr)cmd, IntPtr.Zero, 0x2 /*SMTO_ABORTIFHUNG*/, 2000, out r) != IntPtr.Zero;
         }
 
         /// <summary>기록 모드를 정상 종료(저장 후 끝)시키고 끝날 때까지 기다린다.</summary>

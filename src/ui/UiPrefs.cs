@@ -27,7 +27,7 @@ namespace UsageTracker.Ui
                 string f = PathOf(dataDir);
                 if (!File.Exists(f)) return p;
                 var d = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-                foreach (var line in File.ReadAllLines(f, Encoding.UTF8))
+                foreach (var line in AtomicFile.ReadAllLinesShared(f))
                 {
                     int eq = line.IndexOf('=');
                     if (eq > 0) d[line.Substring(0, eq).Trim()] = line.Substring(eq + 1).Trim();

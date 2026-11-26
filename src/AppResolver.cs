@@ -104,39 +104,50 @@ namespace UsageTracker
         /// 터미널에서 실행 중인 CLI 도구의 앱 ID. 창 있는 앱과 섞이지 않게 "cli:" 접두어를 붙인다
         /// (예: Claude CLI의 claude.exe와 Claude 데스크톱 앱의 claude.exe를 구분).
         /// </summary>
-        public string CliApp(uint pid)
+        public string CliApp(uint pid, Dictionary<uint, string> pathCache = null)
         {
             if (pid == 0 || pid == ownPid) return null;
-            string path = ProcessPath(pid);
+            string path;
+            if (pathCache == null || !pathCache.TryGetValue(pid, out path))
+            {
+                path = ProcessPath(pid);
+                if (pathCache != null) pathCache[pid] = path;
+            }
             if (path == null || IsSelf(path)) return null;
             string exeName = System.IO.Path.GetFileName(path);
-            string id, name;
-            if (HostApps.IsHost(exeName))
-            {
-                var target = HostApps.Target(exeName, HostApps.CommandLine(pid));
-                string host = ReadName(path);
-                if (target != null)
-                {
-                    id = "cli:" + exeName.ToLowerInvariant() + ":" + target.Item1.ToLowerInvariant();
-                    string shown = System.IO.Path.GetExtension(target.Item1).Length > 0 && target.Item2 != null
-                        ? System.IO.Path.GetFileNameWithoutExtension(target.Item1) : target.Item1;
-                    name = shown + " (" + host + ")";
-                }
-                else { id = "cli:" + exeName.ToLowerInvariant(); name = host + " (CLI)"; }
-            }
-            else
-            {
-                id = "cli:" + exeName.ToLowerInvariant();
-                name = ReadName(path) + " (CLI)";
-            }
+            bool isHost = HostApps.IsHost(exeName);
+            Tuple<string, string> target = isHost ? HostApps.Target(exeName, HostApps.CommandLine(pid)) : null;
+            string id = target != null
+                ? "cli:" + exeName.ToLowerInvariant() + ":" + target.Item1.ToLowerInvariant()
+                : "cli:" + exeName.ToLowerInvariant();
             AppInfo a;
             if (!known.TryGetValue(id, out a))
             {
+                string hostOrApp = ReadName(path);
+                string name;
+                if (target != null)
+                {
+                    string shown = target.Item2 != null ? SafeNameWithoutExtension(target.Item1) : target.Item1;
+                    name = shown + " (" + hostOrApp + ")";
+                }
+                else
+                {
+                    name = hostOrApp + " (CLI)";
+                }
                 a = new AppInfo { Id = id, Name = name, Path = path, FirstSeen = DateTime.Now };
                 known[id] = a;
                 newApps.Add(a);
             }
             return a.Id;
+        }
+
+        static string SafeNameWithoutExtension(string name)
+        {
+            try
+            {
+                return System.IO.Path.GetExtension(name).Length > 0 ? System.IO.Path.GetFileNameWithoutExtension(name) : name;
+            }
+            catch (ArgumentException) { return name; }
         }
 
         bool IsSelf(string path)
@@ -173,6 +184,14 @@ namespace UsageTracker
                 known[id] = a;
                 newApps.Add(a);
             }
+            else if (!string.Equals(a.Path, path, StringComparison.OrdinalIgnoreCase)
+                && System.IO.Path.IsPathRooted(path) && File.Exists(path)
+                && (string.IsNullOrEmpty(a.Path) || !File.Exists(a.Path)))
+            {
+                // 스토어·Electron 앱 업데이트로 exe 경로가 바뀌면 최신 경로로 갱신 (아이콘·파일 위치 열기 유지)
+                a.Path = path;
+                newApps.Add(a);
+            }
             byPath[path] = a;
             return a.Id;
         }
@@ -187,8 +206,7 @@ namespace UsageTracker
             if (!known.TryGetValue(id, out a))
             {
                 string host = ReadName(hostPath);
-                string shown = System.IO.Path.GetExtension(target.Item1).Length > 0 && target.Item2 != null
-                    ? System.IO.Path.GetFileNameWithoutExtension(target.Item1) : target.Item1;
+                string shown = target.Item2 != null ? SafeNameWithoutExtension(target.Item1) : target.Item1;
                 a = new AppInfo { Id = id, Name = shown + " (" + host + ")", Path = target.Item2 ?? hostPath, FirstSeen = DateTime.Now };
                 known[id] = a;
                 newApps.Add(a);

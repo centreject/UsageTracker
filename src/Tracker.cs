@@ -26,6 +26,7 @@ namespace UsageTracker
         bool locked, suspended, idle, paused;
         DateTime pauseUntil;          // DateTime.MaxValue = 다시 켤 때까지
         long lastTickTs;
+        long lastExceptionTs = long.MinValue;   // 소리·전체 화면 예외가 마지막으로 확인된 시점
 
         public int IdleThresholdMs = 5 * 60 * 1000;
         public int TickIntervalMs = 60 * 1000;
@@ -40,6 +41,7 @@ namespace UsageTracker
         public bool IsPaused { get { return paused; } }
         public DateTime PauseUntil { get { return pauseUntil; } }
         public bool IsLocked { get { return locked; } }
+        public bool HasActiveApp { get { return fgApp != null; } }
 
         public string StatusText()
         {
@@ -88,20 +90,22 @@ namespace UsageTracker
             if (locked == value) return;
             locked = value;
             idle = false;
+            lastExceptionTs = long.MinValue;
             if (!value) RefreshForeground();
             Reconcile();
             if (!value) RefreshRunning();
         }
 
-        public void SetSuspended(bool value)
+        /// <summary>절전 상태 전환. 실제로 상태가 바뀌었을 때만 true.</summary>
+        public bool SetSuspended(bool value)
         {
-            if (suspended == value) return;
+            if (suspended == value) return false;
             suspended = value;
             idle = false;
+            lastExceptionTs = long.MinValue;
             if (value)
             {
                 Reconcile();
-                CloseRunning(env.Ts());
                 Flush();
             }
             else
@@ -111,6 +115,7 @@ namespace UsageTracker
                 Reconcile();
                 RefreshRunning();
             }
+            return true;
         }
 
         /// <summary>minutes &gt; 0: 그만큼 일시정지, minutes &lt; 0: 다시 켤 때까지, 0: 재개.</summary>
@@ -160,6 +165,13 @@ namespace UsageTracker
 
             if (suspended) return;
 
+            // UWP 창이 막 뜰 때 안쪽 앱이 아직 없어 fgApp이 비어 있었을 수 있으므로 다시 확인한다
+            if (fgApp == null && ActiveAllowed && fgHwnd != IntPtr.Zero && env.Foreground() == fgHwnd)
+            {
+                string resolved = env.AppOf(fgHwnd);
+                if (resolved != null) { fgApp = resolved; Reconcile(); }
+            }
+
             var audioApps = env.AudioApps();
 
             // 자리 비움 판정: 입력이 없어도 맨 앞 앱이 소리를 내거나 전체 화면이면 사용 중으로 본다
@@ -167,7 +179,8 @@ namespace UsageTracker
             {
                 uint idleMs = env.IdleMs();
                 bool exception = fgApp != null && (audioApps.Contains(fgApp) || env.IsFullscreen(fgHwnd));
-                if (idleMs >= IdleThresholdMs && !exception) EnterIdle(ts, idleMs);
+                if (exception) lastExceptionTs = ts;
+                else if (idleMs >= IdleThresholdMs) EnterIdle(ts, idleMs);
             }
 
             SampleRunning(audioApps, ts, now);
@@ -178,8 +191,10 @@ namespace UsageTracker
         {
             if (!idle) return true;
             uint idleMs = env.IdleMs();
-            if (idleMs > 5000) return false;
+            uint resumeLimit = IdleThresholdMs > 0 ? (uint)Math.Min(5000, IdleThresholdMs - 1) : 5000;
+            if (idleMs > resumeLimit) return false;
             idle = false;
+            lastExceptionTs = long.MinValue;
             RefreshForeground();
             long ts = env.Ts() - Clock.MsToTs(idleMs);
             ReconcileAt(ts, env.Now().AddMilliseconds(-idleMs));
@@ -190,6 +205,9 @@ namespace UsageTracker
         {
             idle = true;
             long at = ts - Clock.MsToTs(idleMs);   // 마지막 입력 시점까지만 집계
+            // 영상 시청(소리·전체 화면 예외) 뒤 재생이 끝나 자리 비움이 됐을 때, 시청 시간까지 되감아 지우지 않는다
+            if (lastExceptionTs > at) at = Math.Min(lastExceptionTs, ts);
+            lastExceptionTs = long.MinValue;
             if (active != null) { Close(active, Math.Max(at, active.StartTs)); active = null; }
             if (used != null) { Close(used, Math.Max(at, used.StartTs)); used = null; }
         }
@@ -280,6 +298,7 @@ namespace UsageTracker
 
         void CloseAll(long ts)
         {
+            lastExceptionTs = long.MinValue;
             if (active != null) { Close(active, ts); active = null; }
             if (used != null) { Close(used, ts); used = null; }
             if (on != null) { Close(on, ts); on = null; }
@@ -311,6 +330,7 @@ namespace UsageTracker
             Flush();
             DataMaintenance.ResetAll(writer.Dir);
             env.ResetApps();
+            lastExceptionTs = long.MinValue;
             long ts = env.Ts(); DateTime now = env.Now();
             if (on != null) on = Restart(on, ts, now);
             if (used != null) used = Restart(used, ts, now);

@@ -54,7 +54,10 @@ namespace UsageTracker
         public const uint TPM_RIGHTALIGN = 0x0008;
 
         // 창
+        public const int GWL_STYLE = -16;
         public const int GWL_EXSTYLE = -20;
+        public const int WS_CAPTION = 0x00C00000;
+        public const int WS_THICKFRAME = 0x00040000;
         public const int WS_EX_TOOLWINDOW = 0x80;
         public const uint GW_OWNER = 4;
         public const int DWMWA_CLOAKED = 14;
@@ -99,6 +102,7 @@ namespace UsageTracker
         [DllImport("user32.dll")] public static extern bool EnumChildWindows(IntPtr parent, EnumWindowsProc proc, IntPtr lParam);
         [DllImport("user32.dll")] public static extern bool EnumWindows(EnumWindowsProc proc, IntPtr lParam);
         [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr hwnd);
+        [DllImport("user32.dll")] public static extern bool IsZoomed(IntPtr hwnd);
         [DllImport("user32.dll")] public static extern IntPtr GetWindow(IntPtr hwnd, uint cmd);
         [DllImport("user32.dll")] public static extern int GetWindowTextLength(IntPtr hwnd);
         [DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern int GetClassName(IntPtr hwnd, StringBuilder name, int max);

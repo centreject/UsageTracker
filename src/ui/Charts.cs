@@ -14,6 +14,7 @@ namespace UsageTracker.Ui
     sealed class TimelineControl : Control
     {
         List<RawSeg> segs = new List<RawSeg>();
+        List<KeyValuePair<string, double>> topLegend = new List<KeyValuePair<string, double>>();
         DateTime day;
         DateTime viewStart, viewEnd;   // 보이는 범위
         bool userZoomed;               // 사용자가 확대·이동했으면 자동 갱신 때 범위를 유지
@@ -29,7 +30,7 @@ namespace UsageTracker.Ui
         readonly int PadX, BarTop, BarH, AxisH, LegendH;
         const double MinSpanMin = 10;
 
-        Point downAt; bool dragging; DateTime dragStartView;
+        Point downAt; bool dragging, suppressClick; DateTime dragStartView;
 
         public TimelineControl()
         {
@@ -48,6 +49,10 @@ namespace UsageTracker.Ui
             this.day = day.Date;
             segs = active;
             this.nameOf = nameOf;
+            var totals = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase);
+            foreach (var s in segs) { double v; totals.TryGetValue(s.AppId, out v); totals[s.AppId] = v + s.Seconds; }
+            topLegend = new List<KeyValuePair<string, double>>(totals);
+            topLegend.Sort((a, b) => b.Value.CompareTo(a.Value));
             if (!sameDay || !userZoomed) FitToData();
             Invalidate();
         }
@@ -113,7 +118,7 @@ namespace UsageTracker.Ui
             }
 
             g.SmoothingMode = SmoothingMode.None;
-            var clip = g.Clip;
+            var state = g.Save();
             g.SetClip(track);
             foreach (var s in segs)
             {
@@ -124,29 +129,25 @@ namespace UsageTracker.Ui
                     c = Color.FromArgb(55, c);
                 using (var b = new SolidBrush(c)) g.FillRectangle(b, x1, BarTop + S(2), x2 - x1, BarH - S(4));
             }
-            g.Clip = clip;
+            g.Restore(state);
 
             // 범례: 이 날 활성 시간 상위 6개 앱. 오른쪽에 조작 안내.
-            var totals = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase);
-            foreach (var s in segs) { double v; totals.TryGetValue(s.AppId, out v); totals[s.AppId] = v + s.Seconds; }
-            var top = new List<KeyValuePair<string, double>>(totals);
-            top.Sort((a, b) => b.Value.CompareTo(a.Value));
             float lx = PadX, ly = BarTop + BarH + AxisH + S(2);
             using (var tb = new SolidBrush(Theme.Subtle))
             {
-                string hint = top.Count == 0 ? "" : userZoomed ? "두 번 클릭하면 원래대로" : "휠로 확대 · 끌어서 이동 · 아래 막대를 눌러도 돼요";
+                string hint = topLegend.Count == 0 ? "" : userZoomed ? "두 번 클릭하면 원래대로" : "휠로 확대 · 끌어서 이동 · 아래 막대를 눌러도 돼요";
                 float hintW = hint.Length == 0 ? 0 : g.MeasureString(hint, Font).Width + S(12);
-                for (int i = 0; i < top.Count && i < 6; i++)
+                for (int i = 0; i < topLegend.Count && i < 6; i++)
                 {
-                    string label = nameOf(top[i].Key);
+                    string label = nameOf(topLegend[i].Key);
                     var sz = g.MeasureString(label, Font);
                     if (lx + S(14) + sz.Width > Width - PadX - hintW) break;
-                    using (var b = new SolidBrush(ColorOf(top[i].Key))) g.FillRectangle(b, lx, ly + S(4), S(10), S(10));
+                    using (var b = new SolidBrush(ColorOf(topLegend[i].Key))) g.FillRectangle(b, lx, ly + S(4), S(10), S(10));
                     g.DrawString(label, Font, tb, lx + S(13), ly + S(1));
                     lx += S(13) + sz.Width + S(12);
                 }
                 if (hint.Length > 0) g.DrawString(hint, Font, tb, Width - PadX - hintW + S(12), ly + S(1));
-                if (top.Count == 0) g.DrawString("이 날은 기록이 없어요", Font, tb, PadX, ly + S(1));
+                if (topLegend.Count == 0) g.DrawString("이 날은 기록이 없어요", Font, tb, PadX, ly + S(1));
             }
         }
 
@@ -191,7 +192,18 @@ namespace UsageTracker.Ui
         {
             base.OnMouseDown(e);
             Focus();   // 휠 입력을 받도록
-            if (e.Button == MouseButtons.Left) { downAt = e.Location; dragging = false; dragStartView = viewStart; }
+            if (e.Button == MouseButtons.Left) { downAt = e.Location; dragging = false; suppressClick = false; dragStartView = viewStart; }
+        }
+
+        protected override void OnMouseUp(MouseEventArgs e)
+        {
+            base.OnMouseUp(e);
+            if (e.Button == MouseButtons.Left && dragging)
+            {
+                dragging = false;
+                suppressClick = true;   // 직후의 MouseClick만 무시하고, 밖에서 놓아도 다음 클릭은 정상 동작하게
+                Cursor = Cursors.Default;
+            }
         }
 
         protected override void OnMouseMove(MouseEventArgs e)
@@ -222,7 +234,7 @@ namespace UsageTracker.Ui
 
         protected override void OnMouseClick(MouseEventArgs e)
         {
-            if (dragging) { dragging = false; return; }
+            if (suppressClick || dragging) { suppressClick = false; dragging = false; return; }
             var s = Hit(e.Location);
             if (s != null && SegmentClicked != null) SegmentClicked(s.AppId);
         }
@@ -261,13 +273,18 @@ namespace UsageTracker.Ui
         public Color BarColor = Color.Empty;
         public string Caption = "";
 
-        const int PadR = 12, PadT = 26, PadB = 20;
+        readonly float k;
+        readonly int PadR, PadT, PadB;
         int PadL = 52;   // 세로축 글자 폭에 맞춰 그릴 때마다 다시 정한다
 
         public HourlyChart()
         {
             SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.UserPaint | ControlStyles.ResizeRedraw, true);
+            using (var g = Graphics.FromHwnd(IntPtr.Zero)) k = g.DpiY / 96f;
+            PadR = S(12); PadT = S(26); PadB = S(20);
         }
+
+        int S(int v) { return (int)Math.Round(v * k); }
 
         string[] axisLabels, tipLabels;
 
@@ -318,12 +335,13 @@ namespace UsageTracker.Ui
             double top = NiceMax(Math.Max(max, 1), out step);
             float widest = 0;
             for (double v = 0; v <= top + 0.1; v += step) widest = Math.Max(widest, g.MeasureString(AxisLabel(v), Font).Width);
-            PadL = (int)Math.Ceiling(widest) + 10;
+            PadL = (int)Math.Ceiling(widest) + S(10);
             var plot = Plot;
+            if (plot.Width <= 0 || plot.Height <= 0 || values.Length == 0) return;
 
             using (var tb = new SolidBrush(Theme.Text))
             using (var bold = new Font(Font, FontStyle.Bold))
-                g.DrawString(Caption, bold, tb, PadL - 4, 4);
+                g.DrawString(Caption, bold, tb, PadL - S(4), S(4));
 
             // 옅은 가로 눈금선
             using (var grid = new Pen(Theme.Grid))
@@ -335,7 +353,7 @@ namespace UsageTracker.Ui
                     g.DrawLine(grid, plot.Left, y, plot.Right, y);
                     string s = AxisLabel(v);
                     var sz = g.MeasureString(s, Font);
-                    g.DrawString(s, Font, mb, plot.Left - sz.Width - 4, y - sz.Height / 2);
+                    g.DrawString(s, Font, mb, plot.Left - sz.Width - S(4), y - sz.Height / 2);
                 }
                 int n = values.Length;
                 float bw = plot.Width / n;
@@ -344,7 +362,7 @@ namespace UsageTracker.Ui
                     string s = axisLabels != null && h < axisLabels.Length ? axisLabels[h] : null;
                     if (s == null) continue;
                     var sz = g.MeasureString(s, Font);
-                    g.DrawString(s, Font, mb, plot.Left + bw * h + bw / 2 - sz.Width / 2, plot.Bottom + 2);
+                    g.DrawString(s, Font, mb, plot.Left + bw * h + bw / 2 - sz.Width / 2, plot.Bottom + S(2));
                 }
             }
 
@@ -352,16 +370,16 @@ namespace UsageTracker.Ui
             g.SmoothingMode = SmoothingMode.AntiAlias;
             int count = values.Length;
             float w = plot.Width / count;
-            float gap = w > 6 ? 1 : 0;   // 막대 사이 2px 간격 (아주 좁으면 생략)
+            float gap = w > S(6) ? 1 : 0;   // 막대 사이 2px 간격 (아주 좁으면 생략)
             using (var b = new SolidBrush(BarColor.IsEmpty ? Theme.Accent : BarColor))
             {
                 for (int h = 0; h < count; h++)
                 {
                     if (values[h] <= 0) continue;
                     float bh = Math.Max(2, (float)(values[h] / top * plot.Height));
-                    float barW = Math.Min(w - 2 * gap, 40);   // 막대가 몇 개 안 될 때 너무 넓어지지 않게
+                    float barW = Math.Max(1, Math.Min(w - 2 * gap, S(40)));   // 막대가 몇 개 안 될 때 너무 넓어지지 않게
                     var r = new RectangleF(plot.Left + w * h + (w - barW) / 2, plot.Bottom - bh, barW, bh);
-                    FillTopRounded(g, b, r, Math.Min(4, Math.Min(r.Width / 2, r.Height)));
+                    FillTopRounded(g, b, r, Math.Min(S(4), Math.Min(r.Width / 2, r.Height)));
                     if (h == lastHour)
                         using (var hl = new SolidBrush(Color.FromArgb(40, Theme.Text))) g.FillRectangle(hl, r);
                 }
@@ -390,7 +408,7 @@ namespace UsageTracker.Ui
         {
             var plot = Plot;
             int h = -1;
-            if (e.X >= plot.Left && e.X < plot.Right && e.Y >= plot.Top - 4 && e.Y <= plot.Bottom)
+            if (plot.Width > 0 && values.Length > 0 && e.X >= plot.Left && e.X < plot.Right && e.Y >= plot.Top - 4 && e.Y <= plot.Bottom)
                 h = Math.Min(values.Length - 1, (int)((e.X - plot.Left) / (plot.Width / values.Length)));
             if (h != lastHour)
             {

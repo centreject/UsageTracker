@@ -41,7 +41,7 @@ namespace UsageTracker
         {
             string f = Path.Combine(dir, name);
             if (!File.Exists(f)) yield break;
-            foreach (var line in File.ReadAllLines(f, Encoding.UTF8))
+            foreach (var line in AtomicFile.ReadAllLinesShared(f))
             {
                 if (line.Length == 0 || line.StartsWith("V\t")) continue;
                 yield return line.Split('\t');

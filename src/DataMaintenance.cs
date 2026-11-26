@@ -12,7 +12,8 @@ namespace UsageTracker
     /// </summary>
     static class DataMaintenance
     {
-        public const int OpDelete = 1, OpReset = 2;
+        // 다른 프로그램의 우연한 WM_COPYDATA(dwData=1, 2)와 충돌하지 않도록 고유 서명("UT")을 붙인다.
+        public const int OpDelete = 0x55540001, OpReset = 0x55540002;
 
         /// <summary>해당 앱들의 활성·실행 구간(열림 표시 포함)을 모든 월 파일에서 지운다. 지운 줄 수를 돌려준다.</summary>
         public static int DeleteApps(string dir, ICollection<string> ids)
@@ -97,11 +98,17 @@ namespace UsageTracker
         /// <summary>기록 모드 쪽: WM_COPYDATA 내용을 읽는다.</summary>
         public static bool Parse(IntPtr lParam, out int op, out string[] ids)
         {
+            op = 0;
+            ids = new string[0];
+            if (lParam == IntPtr.Zero) return false;
             var cds = (COPYDATASTRUCT)Marshal.PtrToStructure(lParam, typeof(COPYDATASTRUCT));
             op = cds.dwData.ToInt32();
-            string s = cds.cbData > 0 ? Marshal.PtrToStringUni(cds.lpData) : "";
+            if (op != OpDelete && op != OpReset) return false;
+            string s = cds.cbData > 0 && cds.lpData != IntPtr.Zero
+                ? Marshal.PtrToStringUni(cds.lpData, cds.cbData / 2).TrimEnd('\0')
+                : "";
             ids = s.Length == 0 ? new string[0] : s.Split('\n');
-            return op == OpDelete || op == OpReset;
+            return true;
         }
     }
 }

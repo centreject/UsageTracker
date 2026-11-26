@@ -83,8 +83,12 @@ namespace UsageTracker
             {
                 foreach (uint pid in CliApps.Pick(CliApps.Snapshot(), windowPids))
                 {
-                    string id = apps.CliApp(pid);
-                    if (id != null) set.Add(id);
+                    try
+                    {
+                        string id = apps.CliApp(pid, cache);
+                        if (id != null) set.Add(id);
+                    }
+                    catch (Exception ex) { ErrorLog.Write("cli", ex); }
                 }
             }
             catch (Exception ex) { ErrorLog.Write("cli", ex); }
@@ -101,8 +105,21 @@ namespace UsageTracker
             IntPtr mon = Native.MonitorFromWindow(hwnd, 2 /*MONITOR_DEFAULTTONEAREST*/);
             var mi = new Native.MONITORINFO { cbSize = System.Runtime.InteropServices.Marshal.SizeOf(typeof(Native.MONITORINFO)) };
             if (!Native.GetMonitorInfo(mon, ref mi)) return false;
-            return r.Left <= mi.rcMonitor.Left && r.Top <= mi.rcMonitor.Top &&
-                   r.Right >= mi.rcMonitor.Right && r.Bottom >= mi.rcMonitor.Bottom;
+            return IsFullscreenRect(r, mi.rcMonitor, Native.IsZoomed(hwnd), Native.GetWindowLong(hwnd, Native.GWL_STYLE));
+        }
+
+        /// <summary>
+        /// 모니터 전체를 덮는지 판정한다. 작업 표시줄이 없는 보조 모니터·자동 숨김 환경에서는
+        /// 일반 최대화 창(제목 표시줄 + 크기 조절 테두리)도 모니터를 덮으므로 전체 화면에서 뺀다.
+        /// </summary>
+        internal static bool IsFullscreenRect(Native.RECT r, Native.RECT mon, bool zoomed, int style)
+        {
+            bool covers = r.Left <= mon.Left && r.Top <= mon.Top &&
+                          r.Right >= mon.Right && r.Bottom >= mon.Bottom;
+            if (!covers) return false;
+            if (zoomed && (style & Native.WS_CAPTION) == Native.WS_CAPTION && (style & Native.WS_THICKFRAME) != 0)
+                return false;
+            return true;
         }
     }
 }
