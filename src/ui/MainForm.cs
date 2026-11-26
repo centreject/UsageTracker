@@ -52,7 +52,7 @@ namespace UsageTracker.Ui
 
         // 컨트롤
         readonly RadioButton[] tabs = new RadioButton[4];
-        readonly Button prevBtn = new Button(), nextBtn = new Button(), todayBtn = new Button();
+        readonly Button prevBtn = new Themer.FlatButton(), nextBtn = new Themer.FlatButton(), todayBtn = new Themer.FlatButton();
         readonly Label periodLabel = new Label();
         readonly TimelineControl timeline = new TimelineControl();
         readonly ListView list = new ListView();

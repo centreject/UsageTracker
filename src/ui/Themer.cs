@@ -59,6 +59,7 @@ namespace UsageTracker.Ui
                 b.FlatAppearance.MouseOverBackColor = t.Track;
                 b.BackColor = t.Back;
                 b.ForeColor = c.Tag as string == "danger" ? Danger(t) : t.Text;
+                if (c is FlatButton) ((FlatButton)c).Theme = t;
             }
             else if (c is TextBox || c is NumericUpDown)
             {
@@ -79,6 +80,12 @@ namespace UsageTracker.Ui
             foreach (Control child in c.Controls) Apply(child, t);
         }
 
+        /// <summary>두 색을 섞는다. k=0이면 a, 1이면 b.</summary>
+        public static Color Mix(Color a, Color b, double k)
+        {
+            return Color.FromArgb((int)(a.R + (b.R - a.R) * k), (int)(a.G + (b.G - a.G) * k), (int)(a.B + (b.B - a.B) * k));
+        }
+
         public static Color Danger(Theme t) { return t.Dark ? Color.FromArgb(0xe6, 0x67, 0x67) : Color.FromArgb(0xd0, 0x3b, 0x3b); }
 
         public static void Menu(ToolStrip m, Theme t)
@@ -87,6 +94,27 @@ namespace UsageTracker.Ui
             m.BackColor = t.Panel;
             m.ForeColor = t.Text;
             foreach (ToolStripItem i in m.Items) i.ForeColor = i.Tag as string == "danger" ? Danger(t) : t.Text;
+        }
+
+        /// <summary>WinForms는 비활성 단추 글씨를 음각(흰 그림자 + 회색)으로 그려 다크 테마에서 번져 보인다.
+        /// 비활성일 때만 테마의 흐린 글씨색으로 선명하게 직접 그린다.</summary>
+        public sealed class FlatButton : Button
+        {
+            Theme theme;
+            public Theme Theme { get { return theme; } set { theme = value; Invalidate(); } }
+
+            protected override void OnEnabledChanged(EventArgs e) { base.OnEnabledChanged(e); Invalidate(); }
+
+            protected override void OnPaint(PaintEventArgs e)
+            {
+                if (Enabled || theme == null) { base.OnPaint(e); return; }
+                var g = e.Graphics;
+                g.Clear(BackColor);
+                using (var pen = new Pen(Mix(theme.Back, theme.Border, 0.6)))
+                    g.DrawRectangle(pen, 0, 0, Width - 1, Height - 1);
+                TextRenderer.DrawText(g, Text, Font, ClientRectangle, Mix(theme.Back, theme.Text, 0.42),
+                    TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.SingleLine | TextFormatFlags.NoPrefix);
+            }
         }
 
         sealed class MenuColors : ProfessionalColorTable
