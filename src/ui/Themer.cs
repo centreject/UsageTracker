@@ -58,7 +58,7 @@ namespace UsageTracker.Ui
                 b.FlatAppearance.BorderColor = t.Border;
                 b.FlatAppearance.MouseOverBackColor = t.Track;
                 b.BackColor = t.Back;
-                b.ForeColor = c.Tag as string == "danger" ? Danger(t) : t.Text;
+                b.ForeColor = c.Tag as string == "danger" ? Danger(t) : (c.Tag as string == "subtle" ? t.Subtle : t.Text);
                 if (c is FlatButton) ((FlatButton)c).Theme = t;
             }
             else if (c is TextBox || c is NumericUpDown)

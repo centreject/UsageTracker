@@ -312,10 +312,12 @@ namespace UsageTracker.Ui
             list.SmallImageList = images;
             list.BackColor = theme.Back;
             list.ForeColor = theme.Text;
-            list.Columns.Add("이름", 300);
-            list.Columns.Add("활성 시간", 110, HorizontalAlignment.Right);
-            list.Columns.Add("실행 시간", 110, HorizontalAlignment.Right);
-            list.Columns.Add("비율", 70, HorizontalAlignment.Right);
+            // 열 너비는 픽셀이라 배율에 맞춰 키운다 (정렬 화살표가 굵은 글씨로 붙어도 잘리지 않게)
+            double colK = ScreenDpi() / 96.0;
+            list.Columns.Add("이름", (int)(300 * colK));
+            list.Columns.Add("활성 시간", (int)(110 * colK), HorizontalAlignment.Right);
+            list.Columns.Add("실행 시간", (int)(110 * colK), HorizontalAlignment.Right);
+            list.Columns.Add("비율", (int)(78 * colK), HorizontalAlignment.Right);
             list.ColumnClick += (s, e) => SortBy(e.Column);
             list.SelectedIndexChanged += (s, e) => OnSelection();
             list.Resize += (s, e) => FitNameColumn();

@@ -102,7 +102,8 @@ namespace UsageTracker.Ui
             bool winOff = !devMode && AutoStart.DisabledInWindows();
             autoStart.Checked = settings.AutoStart && !winOff;
             autoStartInitially = autoStart.Checked;
-            autoStart.Enabled = !devMode;
+            // 비활성 체크 상자는 다크 테마에서 글씨가 거의 안 보이므로, 끄지 않고 누를 수만 없게 한다
+            if (devMode) { autoStart.AutoCheck = false; autoStart.Tag = "subtle"; autoStart.Cursor = Cursors.Default; }
             autoStart.Margin = new Padding(0, 8, 0, 0);
             root.Controls.Add(autoStart);
             if (devMode) root.Controls.Add(Note("시험용 데이터 폴더로 실행 중이라 자동 시작은 바꿀 수 없어요."));
