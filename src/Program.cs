@@ -143,7 +143,7 @@ namespace UsageTracker
 
         static string dataDir;
 
-        static string Fnv(string s)
+        internal static string Fnv(string s)
         {
             uint h = 2166136261;
             foreach (char c in s) { h ^= c; h *= 16777619; }

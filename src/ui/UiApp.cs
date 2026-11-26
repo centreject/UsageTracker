@@ -43,12 +43,14 @@ namespace UsageTracker.Ui
                 return 0;
             }
             bool created;
-            using (var mutex = new Mutex(true, "Local\\UsageTracker.UI", out created))
+            // 시험 폴더(--data=)로 연 창은 폴더마다 따로 띄운다. 실제 창을 앞으로 가져오지 않게.
+            string uiMutex = "Local\\UsageTracker.UI" + (devMode ? "." + Program.Fnv(dataDir.TrimEnd('\\').ToLowerInvariant()) : "");
+            using (var mutex = new Mutex(true, uiMutex, out created))
             {
                 if (!created)
                 {
                     // 이미 열려 있으면 그 창을 앞으로
-                    Activate(MainForm.WindowTitle);
+                    if (!devMode) Activate(MainForm.WindowTitle);
                     return 0;
                 }
                 Application.EnableVisualStyles();

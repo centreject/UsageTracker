@@ -7,13 +7,16 @@ using System.Windows.Forms;
 namespace UsageTracker.Ui
 {
     /// <summary>
-    /// 하루 0–24시 활성 앱 타임라인 띠. 앱마다 고정 색, 선택한 앱 외에는 흐리게.
+    /// 하루 활성 앱 타임라인 띠. 앱마다 고정 색, 선택한 앱 외에는 흐리게.
+    /// 기본은 그날 기록이 있는 시간대만 보여 주고(정시 단위), 휠로 확대·축소, 끌어서 옮기기, 두 번 클릭으로 원래대로.
     /// 마우스를 올리면 앱·시각, 누르면 그 앱을 선택한다. 아래에 상위 앱 범례.
     /// </summary>
     sealed class TimelineControl : Control
     {
         List<RawSeg> segs = new List<RawSeg>();
         DateTime day;
+        DateTime viewStart, viewEnd;   // 보이는 범위
+        bool userZoomed;               // 사용자가 확대·이동했으면 자동 갱신 때 범위를 유지
         Func<string, string> nameOf = k => k;
         readonly ToolTip tip = new ToolTip { InitialDelay = 0, ReshowDelay = 0, AutoPopDelay = 10000 };
         string lastTip;
@@ -22,26 +25,63 @@ namespace UsageTracker.Ui
         public string Selected;
         public event Action<string> SegmentClicked;
 
-        const int PadX = 12, BarTop = 6, BarH = 22, AxisH = 16, LegendH = 18;
+        readonly float k;   // 화면 배율
+        readonly int PadX, BarTop, BarH, AxisH, LegendH;
+        const double MinSpanMin = 10;
+
+        Point downAt; bool dragging; DateTime dragStartView;
 
         public TimelineControl()
         {
             SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.UserPaint | ControlStyles.ResizeRedraw, true);
-            Height = BarTop + BarH + AxisH + LegendH + 6;
+            using (var g = Graphics.FromHwnd(IntPtr.Zero)) k = g.DpiY / 96f;
+            PadX = S(12); BarTop = S(6); BarH = S(34); AxisH = S(18); LegendH = S(20);
+            Height = BarTop + BarH + AxisH + LegendH + S(6);
+            viewStart = DateTime.Today; viewEnd = viewStart.AddDays(1);
         }
+
+        int S(int v) { return (int)Math.Round(v * k); }
 
         public void SetData(DateTime day, List<RawSeg> active, Func<string, string> nameOf)
         {
+            bool sameDay = this.day == day.Date;
             this.day = day.Date;
             segs = active;
             this.nameOf = nameOf;
+            if (!sameDay || !userZoomed) FitToData();
             Invalidate();
         }
 
+        /// <summary>기록이 있는 첫 정시부터 마지막 정시까지. 기록이 없으면 하루 전체.</summary>
+        void FitToData()
+        {
+            userZoomed = false;
+            if (segs.Count == 0) { viewStart = day; viewEnd = day.AddDays(1); return; }
+            DateTime a = DateTime.MaxValue, b = DateTime.MinValue;
+            foreach (var s in segs) { if (s.Start < a) a = s.Start; if (s.End > b) b = s.End; }
+            if (a < day) a = day;
+            if (b > day.AddDays(1)) b = day.AddDays(1);
+            var from = new DateTime(a.Year, a.Month, a.Day, a.Hour, 0, 0);
+            var to = new DateTime(b.Year, b.Month, b.Day, b.Hour, 0, 0);
+            if (to < b) to = to.AddHours(1);
+            if ((to - from).TotalHours < 2) to = from.AddHours(2);
+            if (to > day.AddDays(1)) { to = day.AddDays(1); from = to.AddHours(-2); }
+            viewStart = from; viewEnd = to;
+        }
+
+        float BarLeft { get { return PadX; } }
+        float Span { get { return Math.Max(1, Width - PadX * 2); } }
+
         float X(DateTime t)
         {
-            double frac = (t - day).TotalSeconds / 86400.0;
-            return PadX + (float)(frac * (Width - PadX * 2));
+            double frac = (t - viewStart).TotalSeconds / (viewEnd - viewStart).TotalSeconds;
+            return BarLeft + (float)(frac * Span);
+        }
+
+        DateTime TimeAt(float x)
+        {
+            double frac = (x - BarLeft) / Span;
+            return viewStart.AddSeconds(frac * (viewEnd - viewStart).TotalSeconds);
         }
 
         protected override void OnPaint(PaintEventArgs e)
@@ -49,51 +89,64 @@ namespace UsageTracker.Ui
             var g = e.Graphics;
             g.Clear(Theme.Back);
             g.SmoothingMode = SmoothingMode.AntiAlias;
-            var track = new RectangleF(PadX, BarTop, Width - PadX * 2, BarH);
-            using (var b = new SolidBrush(Theme.Track)) FillRounded(g, b, track, 4);
+            var track = new RectangleF(PadX, BarTop, Span, BarH);
+            using (var b = new SolidBrush(Theme.Track)) FillRounded(g, b, track, S(4));
 
-            // 3시간마다 눈금 (옅게)
+            // 눈금: 글자가 겹치지 않는 가장 촘촘한 간격
+            int[] steps = { 5, 10, 15, 30, 60, 120, 180, 360 };
+            double spanMin = (viewEnd - viewStart).TotalMinutes;
+            int step = 360;
+            foreach (int st in steps) if (Span * st / spanMin >= S(44)) { step = st; break; }
             using (var pen = new Pen(Theme.Grid))
             using (var tb = new SolidBrush(Theme.Subtle))
             {
-                for (int h = 0; h <= 24; h += 3)
+                var t0 = day.AddMinutes(Math.Ceiling((viewStart - day).TotalMinutes / step) * step);
+                for (var t = t0; t <= viewEnd; t = t.AddMinutes(step))
                 {
-                    float x = PadX + h / 24f * (Width - PadX * 2);
-                    g.DrawLine(pen, x, BarTop + BarH, x, BarTop + BarH + 3);
-                    string s = h.ToString("00");
+                    float x = X(t);
+                    g.DrawLine(pen, x, BarTop + BarH, x, BarTop + BarH + S(3));
+                    int h = (int)(t - day).TotalHours;
+                    string s = step >= 60 ? h.ToString("00") : h.ToString("00") + ":" + t.Minute.ToString("00");
                     var sz = g.MeasureString(s, Font);
-                    g.DrawString(s, Font, tb, Math.Max(0, Math.Min(Width - sz.Width, x - sz.Width / 2)), BarTop + BarH + 2);
+                    g.DrawString(s, Font, tb, Math.Max(0, Math.Min(Width - sz.Width, x - sz.Width / 2)), BarTop + BarH + S(2));
                 }
             }
 
             g.SmoothingMode = SmoothingMode.None;
+            var clip = g.Clip;
+            g.SetClip(track);
             foreach (var s in segs)
             {
+                if (s.End <= viewStart || s.Start >= viewEnd) continue;
                 float x1 = X(s.Start), x2 = Math.Max(X(s.End), x1 + 1);
                 var c = ColorOf(s.AppId);
                 if (Selected != null && !string.Equals(Selected, s.AppId, StringComparison.OrdinalIgnoreCase))
                     c = Color.FromArgb(55, c);
-                using (var b = new SolidBrush(c)) g.FillRectangle(b, x1, BarTop + 2, x2 - x1, BarH - 4);
+                using (var b = new SolidBrush(c)) g.FillRectangle(b, x1, BarTop + S(2), x2 - x1, BarH - S(4));
             }
+            g.Clip = clip;
 
-            // 범례: 이 날 활성 시간 상위 6개 앱
+            // 범례: 이 날 활성 시간 상위 6개 앱. 오른쪽에 조작 안내.
             var totals = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase);
             foreach (var s in segs) { double v; totals.TryGetValue(s.AppId, out v); totals[s.AppId] = v + s.Seconds; }
             var top = new List<KeyValuePair<string, double>>(totals);
             top.Sort((a, b) => b.Value.CompareTo(a.Value));
-            float lx = PadX, ly = BarTop + BarH + AxisH + 2;
+            float lx = PadX, ly = BarTop + BarH + AxisH + S(2);
             using (var tb = new SolidBrush(Theme.Subtle))
             {
+                string hint = top.Count == 0 ? "" : userZoomed ? "두 번 클릭하면 원래대로" : "휠로 확대 · 끌어서 이동 · 아래 막대를 눌러도 돼요";
+                float hintW = hint.Length == 0 ? 0 : g.MeasureString(hint, Font).Width + S(12);
                 for (int i = 0; i < top.Count && i < 6; i++)
                 {
                     string label = nameOf(top[i].Key);
                     var sz = g.MeasureString(label, Font);
-                    if (lx + 14 + sz.Width > Width - PadX) break;
-                    using (var b = new SolidBrush(ColorOf(top[i].Key))) g.FillRectangle(b, lx, ly + 4, 10, 10);
-                    g.DrawString(label, Font, tb, lx + 13, ly + 1);
-                    lx += 13 + sz.Width + 12;
+                    if (lx + S(14) + sz.Width > Width - PadX - hintW) break;
+                    using (var b = new SolidBrush(ColorOf(top[i].Key))) g.FillRectangle(b, lx, ly + S(4), S(10), S(10));
+                    g.DrawString(label, Font, tb, lx + S(13), ly + S(1));
+                    lx += S(13) + sz.Width + S(12);
                 }
-                if (top.Count == 0) g.DrawString("이 날은 기록이 없어요", Font, tb, PadX, ly + 1);
+                if (hint.Length > 0) g.DrawString(hint, Font, tb, Width - PadX - hintW + S(12), ly + S(1));
+                if (top.Count == 0) g.DrawString("이 날은 기록이 없어요", Font, tb, PadX, ly + S(1));
             }
         }
 
@@ -103,14 +156,57 @@ namespace UsageTracker.Ui
             RawSeg best = null;
             foreach (var s in segs)
             {
+                if (s.End <= viewStart || s.Start >= viewEnd) continue;
                 float x1 = X(s.Start) - 2, x2 = Math.Max(X(s.End), x1 + 3) + 2;   // 얇은 구간도 잡히게 여유
                 if (p.X >= x1 && p.X <= x2) { best = s; if (p.X >= x1 + 2 && p.X <= x2 - 2) break; }
             }
             return best;
         }
 
+        /// <summary>바깥(시간대별 그래프)에서 범위를 정해 확대.</summary>
+        public void ShowRange(DateTime from, DateTime to) { SetView(from, to); }
+
+        void SetView(DateTime from, DateTime to)
+        {
+            double span = (to - from).TotalMinutes;
+            if (span < MinSpanMin) { var mid = from.AddMinutes(span / 2); from = mid.AddMinutes(-MinSpanMin / 2); to = mid.AddMinutes(MinSpanMin / 2); }
+            if ((to - from).TotalDays >= 1) { from = day; to = day.AddDays(1); }
+            if (from < day) { to = to + (day - from); from = day; }
+            if (to > day.AddDays(1)) { from = from - (to - day.AddDays(1)); to = day.AddDays(1); }
+            viewStart = from; viewEnd = to;
+            userZoomed = true;
+            Invalidate();
+        }
+
+        protected override void OnMouseWheel(MouseEventArgs e)
+        {
+            base.OnMouseWheel(e);
+            var at = TimeAt(e.X);
+            double f = e.Delta > 0 ? 0.7 : 1 / 0.7;
+            SetView(at.AddSeconds((viewStart - at).TotalSeconds * f), at.AddSeconds((viewEnd - at).TotalSeconds * f));
+            lastTip = null; tip.Hide(this);
+        }
+
+        protected override void OnMouseDown(MouseEventArgs e)
+        {
+            base.OnMouseDown(e);
+            Focus();   // 휠 입력을 받도록
+            if (e.Button == MouseButtons.Left) { downAt = e.Location; dragging = false; dragStartView = viewStart; }
+        }
+
         protected override void OnMouseMove(MouseEventArgs e)
         {
+            if (e.Button == MouseButtons.Left && (dragging || Math.Abs(e.X - downAt.X) > 4))
+            {
+                dragging = true;
+                double secPerPx = (viewEnd - viewStart).TotalSeconds / Span;
+                var span = viewEnd - viewStart;
+                var from = dragStartView.AddSeconds(-(e.X - downAt.X) * secPerPx);
+                SetView(from, from + span);
+                Cursor = Cursors.SizeWE;
+                lastTip = null; tip.Hide(this);
+                return;
+            }
             var s = Hit(e.Location);
             string text = s == null ? null
                 : nameOf(s.AppId) + "\n" + Fmt.Clock(s.Start) + "–" + Fmt.Clock(s.End) + " (" + Fmt.Long(s.Seconds) + ")";
@@ -126,8 +222,16 @@ namespace UsageTracker.Ui
 
         protected override void OnMouseClick(MouseEventArgs e)
         {
+            if (dragging) { dragging = false; return; }
             var s = Hit(e.Location);
             if (s != null && SegmentClicked != null) SegmentClicked(s.AppId);
+        }
+
+        protected override void OnMouseDoubleClick(MouseEventArgs e)
+        {
+            base.OnMouseDoubleClick(e);
+            FitToData();
+            Invalidate();
         }
 
         public static void FillRounded(Graphics g, Brush b, RectangleF r, float radius)
@@ -295,8 +399,19 @@ namespace UsageTracker.Ui
                 else tip.Show((tipLabels != null && h < tipLabels.Length ? tipLabels[h] : "") + "\n" + Fmt.Long(values[h]), this, e.X + 12, e.Y + 16);
                 Invalidate();
             }
+            Cursor = BarsClickable && h >= 0 ? Cursors.Hand : Cursors.Default;
         }
 
         protected override void OnMouseLeave(EventArgs e) { lastHour = -1; tip.Hide(this); Invalidate(); }
+
+        /// <summary>막대를 누르면 그 칸 번호(시간대별이면 시). 처리하는 쪽이 없으면 아무 일도 없다.</summary>
+        public event Action<int> BarClicked;
+        public bool BarsClickable;
+
+        protected override void OnMouseClick(MouseEventArgs e)
+        {
+            base.OnMouseClick(e);
+            if (BarsClickable && lastHour >= 0 && BarClicked != null) BarClicked(lastHour);
+        }
     }
 }

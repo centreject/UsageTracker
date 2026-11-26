@@ -266,6 +266,7 @@ namespace UsageTracker.Ui
             timeline.Theme = theme;
             timeline.Margin = new Padding(0, 0, 0, 6);
             timeline.SegmentClicked += SelectKey;
+            hourly.BarClicked += h => { if (period == Period.Day) timeline.ShowRange(anchor.Date.AddHours(h), anchor.Date.AddHours(h + 1)); };
             timeline.ColorOf = ColorOf;
             root.Controls.Add(timeline, 0, 1);
 
@@ -754,6 +755,7 @@ namespace UsageTracker.Ui
 
             bool isDay = period == Period.Day;
             timeline.Visible = isDay;
+            hourly.BarsClickable = isDay;   // 일 보기: 시간대 막대를 누르면 위 타임라인을 그 1시간으로 확대
             if (isDay) timeline.SetData(from, sum.ActiveSegments, NameOf);
 
             appCount = keys.Count - (keys.Contains(HiddenKey) ? 1 : 0) - (showHidden ? hiddenInPeriod.Count : 0);   // 숨기지 않은 앱 수
