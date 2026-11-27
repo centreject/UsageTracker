@@ -84,7 +84,7 @@ namespace UsageTracker.Ui
                 AddField("앱 활성 합계", Fmt.Long(rows.Sum(r => r.Active)));
                 AddField("PC 켜짐", Fmt.Long(sum.PcOn));
                 AddField("실제 사용", Fmt.Long(sum.PcUsed));
-                AddNote("목록에서 앱을 고르면 자세한 정보와 시간대별 사용이 보여요.");
+                AddNote("목록에서 앱을 고르면 자세한 정보와 시간대별 사용이 표시됩니다.");
             }
             else if (key == HiddenKey)
             {
@@ -102,7 +102,7 @@ namespace UsageTracker.Ui
                     double a; sumKeys.Active.TryGetValue(k, out a);
                     AddField(catalog.DisplayName(k), Fmt.Long(a));
                 }
-                AddNote("두 번 누르거나 '숨긴 항목 보기'를 켜면 하나씩 볼 수 있어요. 오른쪽 클릭으로 모두 숨김 해제하거나 기록을 지울 수 있어요.");
+                AddNote("두 번 누르거나 '숨긴 항목 보기'를 켜면 하나씩 볼 수 있습니다. 오른쪽 클릭으로 모두 숨김 해제하거나 기록을 지울 수 있습니다.");
             }
             else
             {
@@ -129,8 +129,8 @@ namespace UsageTracker.Ui
                     : (last.Value >= DateTime.Now.AddMinutes(-1) && recorderAlive ? (cli ? "지금 실행 중" : "지금 사용 중") : last.Value.ToString("yyyy-MM-dd HH:mm")));
                 var excludedNow = new Settings(dataDir).Exclude;
                 if (ids.Count > 0 && ids.TrueForAll(id => excludedNow.Contains(id.ToLowerInvariant())))
-                    AddNote("앞으로 기록하지 않는 앱이에요. 설정 → 기록 제외에서 다시 기록하게 할 수 있어요.");
-                if (cli) AddNote("터미널 안에서 실행된 프로그램이에요. 사용(활성) 시간은 터미널 창에 쌓이고, 여기에는 실행 시간만 기록돼요.");
+                    AddNote("앞으로 기록하지 않는 앱입니다. 설정 → 기록 제외에서 다시 기록하게 할 수 있습니다.");
+                if (cli) AddNote("터미널 안에서 실행된 프로그램입니다. 사용(활성) 시간은 터미널 창에 쌓이고, 여기에는 실행 시간만 기록됩니다.");
 
                 if (group)
                 {
@@ -154,7 +154,7 @@ namespace UsageTracker.Ui
                             AddRow(new Label(), link);
                         }
                     }
-                    else if (key == AppResolver.DesktopId) AddNote("바탕화면이 맨 앞에 있던 시간이에요.");
+                    else if (key == AppResolver.DesktopId) AddNote("바탕화면이 맨 앞에 있던 시간입니다.");
                 }
             }
             detail.ResumeLayout();

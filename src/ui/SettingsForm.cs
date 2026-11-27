@@ -59,7 +59,7 @@ namespace UsageTracker.Ui
             idleRow.Controls.Add(idle);
             idleRow.Controls.Add(new Label { Text = "분 동안 입력이 없으면", AutoSize = true, Margin = new Padding(6, 6, 0, 0) });
             root.Controls.Add(idleRow);
-            root.Controls.Add(Note("소리가 나거나 전체 화면이면, 또는 다른 모니터에서 소리 나는 창을 보고 있으면 입력이 없어도 사용 중으로 봐요. 게임패드 입력도 사용으로 쳐요."));
+            root.Controls.Add(Note("소리가 나거나 전체 화면이면, 또는 다른 모니터에서 소리 나는 창을 보고 있으면 입력이 없어도 사용 중으로 봅니다. 게임패드 입력도 사용으로 봅니다."));
 
             // 실제로 자동 시작되는지 보여 준다: Windows 설정 → 시작 앱에서 꺼 두었으면 체크 해제로 보인다
             bool winOff = !devMode && AutoStart.DisabledInWindows();
@@ -69,9 +69,9 @@ namespace UsageTracker.Ui
             if (devMode) { autoStart.AutoCheck = false; autoStart.Tag = "subtle"; autoStart.Cursor = Cursors.Default; }
             autoStart.Margin = new Padding(0, 8, 0, 0);
             root.Controls.Add(autoStart);
-            if (devMode) root.Controls.Add(Note("시험용 데이터 폴더로 실행 중이라 자동 시작은 바꿀 수 없어요."));
+            if (devMode) root.Controls.Add(Note("시험용 데이터 폴더로 실행 중이므로 자동 시작은 바꿀 수 없습니다."));
             else if (winOff && settings.AutoStart)
-                root.Controls.Add(Note("Windows 설정 → 앱 → 시작 앱에서 꺼 둔 상태예요. 여기서 켜고 저장하면 다시 켜져요."));
+                root.Controls.Add(Note("Windows 설정 → 앱 → 시작 앱에서 꺼 둔 상태입니다. 여기서 켜고 저장하면 다시 켜집니다."));
 
             root.Controls.Add(Header("업데이트", bold));
             updateCheck.Checked = settings.UpdateCheck;
@@ -87,15 +87,15 @@ namespace UsageTracker.Ui
             };
             root.Controls.Add(checkNow);
             var st = UpdateState.Load(dataDir);
-            root.Controls.Add(Note("지금 v" + Updater.CurrentVersion().ToString(3)
+            root.Controls.Add(Note("현재 v" + Updater.CurrentVersion().ToString(3)
                 + (st.LastCheck == DateTime.MinValue ? "" : " · 마지막 확인 " + st.LastCheck.ToString("yyyy-MM-dd"))
-                + ". 확인할 때 GitHub에서 버전 정보만 받아요. 새 버전이 있으면 설치할지 물어봐요."));
+                + ". 확인할 때 GitHub에서 버전 정보만 받습니다. 새 버전이 있으면 설치할지 묻습니다."));
 
             // 기록 제외: 목록에서 고른 앱을 다시 기록하게 할 수 있다 (저장할 때 적용)
             root.Controls.Add(Header("기록 제외", bold));
             excluded = settings.Exclude;
             if (excluded.Count == 0)
-                root.Controls.Add(Note("기록하지 않는 앱이 없어요. 통계 창 목록에서 앱을 오른쪽 클릭 → '앞으로 기록하지 않기'로 지정해요."));
+                root.Controls.Add(Note("기록하지 않는 앱이 없습니다. 통계 창 목록에서 앱을 오른쪽 클릭 → '앞으로 기록하지 않기'로 지정합니다."));
             else
             {
                 var catalog = new AppCatalog(dataDir);
@@ -114,14 +114,14 @@ namespace UsageTracker.Ui
                     foreach (var o in sel) excludeList.Items.Remove(o);
                 };
                 root.Controls.Add(include);
-                root.Controls.Add(Note("지난 기록은 남아 있어요. 저장하면 바로 적용돼요."));
+                root.Controls.Add(Note("지난 기록은 남아 있습니다. 저장하면 바로 적용됩니다."));
             }
 
             root.Controls.Add(Header("데이터", bold));
             var folder = new LinkLabel { Text = dataDir, AutoSize = true, MaximumSize = new Size(420, 0), Margin = new Padding(0, 0, 0, 4) };
             folder.LinkClicked += (s, e) => { try { Process.Start("explorer.exe", "\"" + dataDir + "\""); } catch { } };
             root.Controls.Add(folder);
-            root.Controls.Add(Note("기록은 이 PC에만 저장되고, 네트워크로 보내지 않아요. 창 제목은 저장하지 않아요. (업데이트 확인 때만 GitHub에서 버전 정보를 받아요.)"));
+            root.Controls.Add(Note("기록은 이 PC에만 저장되고, 네트워크로 보내지 않습니다. 창 제목은 저장하지 않습니다. (업데이트 확인 때만 GitHub에서 버전 정보를 받습니다.)"));
 
             var reset = new Button { Text = "전체 기록 초기화...", AutoSize = true, Tag = "danger", Margin = new Padding(0, 8, 0, 0) };
             reset.Click += (s, e) => ResetAll();
@@ -130,7 +130,7 @@ namespace UsageTracker.Ui
             var uninstall = new Button { Text = "제거 준비...", AutoSize = true, Margin = new Padding(0, 6, 0, 0) };
             uninstall.Click += (s, e) => PrepareUninstall();
             root.Controls.Add(uninstall);
-            root.Controls.Add(Note("자동 시작 등록을 지우고 기록 프로그램을 끝내요. 그다음 프로그램 폴더를 지우면 돼요."));
+            root.Controls.Add(Note("자동 시작 등록을 지우고 기록 프로그램을 종료합니다. 그다음 프로그램 폴더를 지우면 됩니다."));
 
             var buttons = new FlowLayoutPanel { AutoSize = true, FlowDirection = FlowDirection.RightToLeft, Dock = DockStyle.Fill, Margin = new Padding(0, 16, 0, 0) };
             var save = new Button { Text = "저장", AutoSize = true, MinimumSize = new Size(80, 30) };
@@ -183,18 +183,18 @@ namespace UsageTracker.Ui
 
         void ResetAll()
         {
-            if (MessageBox.Show(this, "모든 사용 기록과 바꾼 이름·숨김·묶음을 지울까요?\n되돌릴 수 없어요. 설정은 남아요.",
+            if (MessageBox.Show(this, "모든 사용 기록과 바꾼 이름·숨김·묶음을 지우시겠습니까?\n되돌릴 수 없습니다. 설정은 유지됩니다.",
                     "전체 기록 초기화", MessageBoxButtons.YesNo, MessageBoxIcon.Warning, MessageBoxDefaultButton.Button2) != DialogResult.Yes) return;
             DataMaintenance.Request(dataDir, DataMaintenance.OpReset, null);
             DataChanged = true;
-            MessageBox.Show(this, "모든 기록을 지웠어요. 지금부터 다시 기록해요.", "전체 기록 초기화", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            MessageBox.Show(this, "모든 기록을 지웠습니다. 지금부터 다시 기록합니다.", "전체 기록 초기화", MessageBoxButtons.OK, MessageBoxIcon.Information);
         }
 
         void PrepareUninstall()
         {
-            if (MessageBox.Show(this, "자동 시작 등록과 시작 메뉴 바로가기를 지우고 기록 프로그램을 끝낼까요?\n그 뒤에는 기록되지 않아요.",
+            if (MessageBox.Show(this, "자동 시작 등록과 시작 메뉴 바로가기를 지우고 기록 프로그램을 종료하시겠습니까?\n그 뒤에는 기록되지 않습니다.",
                     "제거 준비", MessageBoxButtons.YesNo, MessageBoxIcon.Question, MessageBoxDefaultButton.Button2) != DialogResult.Yes) return;
-            bool deleteData = MessageBox.Show(this, "기록 데이터도 지울까요?\n" + dataDir + "\n\n'아니요'를 고르면 데이터는 남겨요.",
+            bool deleteData = MessageBox.Show(this, "기록 데이터도 지우시겠습니까?\n" + dataDir + "\n\n'아니요'를 고르면 데이터는 남겨 둡니다.",
                     "제거 준비", MessageBoxButtons.YesNo, MessageBoxIcon.Warning, MessageBoxDefaultButton.Button2) == DialogResult.Yes;
 
             if (!devMode)
@@ -208,10 +208,10 @@ namespace UsageTracker.Ui
             if (deleteData)
             {
                 try { Directory.Delete(dataDir, true); }
-                catch (Exception ex) { MessageBox.Show(this, "데이터 폴더를 지우지 못했어요: " + ex.Message, "제거 준비"); }
+                catch (Exception ex) { MessageBox.Show(this, "데이터 폴더를 지우지 못했습니다: " + ex.Message, "제거 준비"); }
             }
             Uninstalled = true;
-            MessageBox.Show(this, "준비가 끝났어요. 이제 프로그램 폴더를 지우면 돼요.\n" + Path.GetDirectoryName(Application.ExecutablePath),
+            MessageBox.Show(this, "준비가 끝났습니다. 이제 프로그램 폴더를 지우면 됩니다.\n" + Path.GetDirectoryName(Application.ExecutablePath),
                 "제거 준비", MessageBoxButtons.OK, MessageBoxIcon.Information);
             try { Process.Start("explorer.exe", "/select,\"" + Application.ExecutablePath + "\""); } catch { }
             Close();

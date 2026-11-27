@@ -148,7 +148,7 @@ namespace UsageTracker.Ui
             float lx = PadX, ly = BarTop + BarH + AxisH + S(2);
             using (var tb = new SolidBrush(Theme.Subtle))
             {
-                string hint = topLegend.Count == 0 ? "" : userZoomed ? "두 번 클릭하면 원래대로" : "휠로 확대 · 끌어서 이동 · 아래 막대를 눌러도 돼요";
+                string hint = topLegend.Count == 0 ? "" : userZoomed ? "두 번 클릭하면 원래대로" : "휠로 확대 · 끌어서 이동 · 아래 막대를 눌러도 됩니다";
                 float hintW = hint.Length == 0 ? 0 : g.MeasureString(hint, Font).Width + S(12);
                 for (int i = 0; i < topLegend.Count && i < 6; i++)
                 {
@@ -160,7 +160,7 @@ namespace UsageTracker.Ui
                     lx += S(13) + sz.Width + S(12);
                 }
                 if (hint.Length > 0) g.DrawString(hint, Font, tb, Width - PadX - hintW + S(12), ly + S(1));
-                if (topLegend.Count == 0) g.DrawString("이 날은 기록이 없어요", Font, tb, PadX, ly + S(1));
+                if (topLegend.Count == 0) g.DrawString("이 날은 기록이 없습니다", Font, tb, PadX, ly + S(1));
             }
         }
 
@@ -411,7 +411,7 @@ namespace UsageTracker.Ui
             }
             if (max <= 0)
                 using (var mb = new SolidBrush(Theme.Subtle))
-                    g.DrawString("이 기간에는 활성 시간이 없어요", Font, mb, plot.Left + 8, plot.Top + plot.Height / 2 - 8);
+                    g.DrawString("이 기간에는 활성 시간이 없습니다", Font, mb, plot.Left + 8, plot.Top + plot.Height / 2 - 8);
         }
 
         static void FillTopRounded(Graphics g, Brush b, RectangleF r, float radius)

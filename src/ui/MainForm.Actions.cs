@@ -93,7 +93,7 @@ namespace UsageTracker.Ui
             if (keys.Count < 2 || keys.Contains(HiddenKey)) return;
             // 기본 이름: 이 기간 활성 시간이 가장 긴 항목의 이름
             var top = rows.Where(r => keys.Contains(r.Key)).OrderByDescending(r => r.Active).First();
-            using (var d = new NameDialog(theme, "합치기", keys.Count + "개 항목을 하나로 묶어요. 묶음 이름:", top.Name, null))
+            using (var d = new NameDialog(theme, "합치기", keys.Count + "개 항목을 하나로 묶습니다. 묶음 이름:", top.Name, null))
             {
                 if (d.ShowDialog(this) != DialogResult.OK || string.IsNullOrWhiteSpace(d.Value)) return;
                 string g = catalog.Merge(keys, d.Value.Trim());
@@ -121,10 +121,10 @@ namespace UsageTracker.Ui
             foreach (var k in keys) ids.AddRange(AppCatalog.IsGroup(k) ? catalog.Members(k) : new List<string> { k });
             string what = picked.Count == 1 && picked[0] == HiddenKey ? "숨긴 앱 " + keys.Count + "개"
                         : keys.Count == 1 ? "'" + catalog.DisplayName(keys[0]) + "'" : "선택한 " + keys.Count + "개 항목";
-            if (MessageBox.Show(this, what + "의 모든 기간 사용 기록을 지울까요?\n되돌릴 수 없어요. 앱은 앞으로도 계속 기록돼요.",
+            if (MessageBox.Show(this, what + "의 모든 기간 사용 기록을 지우시겠습니까?\n되돌릴 수 없습니다. 앱은 앞으로도 계속 기록됩니다.",
                     "기록 삭제", MessageBoxButtons.YesNo, MessageBoxIcon.Warning, MessageBoxDefaultButton.Button2) != DialogResult.Yes) return;
             try { DataMaintenance.Request(dataDir, DataMaintenance.OpDelete, ids); }
-            catch (Exception ex) { MessageBox.Show(this, "기록을 지우지 못했어요: " + ex.Message, "기록 삭제"); }
+            catch (Exception ex) { MessageBox.Show(this, "기록을 지우지 못했습니다: " + ex.Message, "기록 삭제"); }
             RefreshData();
         }
 
@@ -137,7 +137,7 @@ namespace UsageTracker.Ui
             foreach (var k in keys) ids.AddRange(AppCatalog.IsGroup(k) ? catalog.Members(k) : new List<string> { k });
             if (ids.Count == 0) return;
             string what = ids.Count == 1 ? "'" + catalog.DisplayName(ids[0]) + "'" : ids.Count + "개 앱";
-            if (MessageBox.Show(this, what + "을(를) 앞으로 기록하지 않을까요?\n지난 기록은 그대로 남아요. 설정에서 다시 기록하게 할 수 있어요.",
+            if (MessageBox.Show(this, what + "을(를) 앞으로 기록하지 않으시겠습니까?\n지난 기록은 그대로 남습니다. 설정에서 다시 기록하게 할 수 있습니다.",
                     "기록 제외", MessageBoxButtons.YesNo, MessageBoxIcon.Question, MessageBoxDefaultButton.Button2) != DialogResult.Yes) return;
             var settings = new Settings(dataDir);
             var list = settings.Exclude;
@@ -176,7 +176,7 @@ namespace UsageTracker.Ui
                 string args = DevMode ? "\"--data=" + dataDir + "\"" : "";
                 Process.Start(Application.ExecutablePath, args);
             }
-            catch (Exception ex) { MessageBox.Show(this, "기록 프로그램을 켜지 못했어요: " + ex.Message, WindowTitle); return; }
+            catch (Exception ex) { MessageBox.Show(this, "기록 프로그램을 실행하지 못했습니다: " + ex.Message, WindowTitle); return; }
             var t = new Timer { Interval = 1500 };
             t.Tick += (s, e) => { t.Stop(); t.Dispose(); RefreshData(); };
             t.Start();

@@ -112,7 +112,7 @@ namespace UsageTracker.Ui
             List<RawSeg> segs;
             bool readFailed = false;
             try { segs = UsageReader.Read(dataDir, from, to, now, recorderAlive); }
-            catch (Exception ex) { segs = new List<RawSeg>(); readFailed = true; status.Text = "기록을 읽지 못했어요: " + ex.Message; }
+            catch (Exception ex) { segs = new List<RawSeg>(); readFailed = true; status.Text = "기록을 읽지 못했습니다: " + ex.Message; }
             // 숨긴 항목은 "숨긴 앱" 한 줄로 모은다 ("숨긴 항목 보기"를 켜면 하나씩 흐리게).
             // 전체 합계·비율·그래프에는 숨긴 항목도 포함한다.
             sumKeys = UsageReader.Summarize(segs, catalog.KeyOf, from, to);
@@ -153,7 +153,7 @@ namespace UsageTracker.Ui
                 + "   ·   앱 활성 합계 " + Fmt.Short(total) + "   ·   앱 " + appCount + "개"
                 + (hiddenInPeriod.Count > 0 ? "   ·   숨김 " + hiddenInPeriod.Count + "개" : "");
             if (!readFailed)
-                status.Text = recorderAlive ? "기록 중 · " + now.ToString("HH:mm") + " 기준" : "기록 프로그램이 꺼져 있어요";
+                status.Text = recorderAlive ? "기록 중 · " + now.ToString("HH:mm") + " 기준" : "기록 프로그램이 꺼져 있습니다";
             startLink.Visible = !recorderAlive;
             int errors = TodayErrorCount();
             errorLink.Visible = errors > 0;
