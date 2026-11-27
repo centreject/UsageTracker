@@ -28,7 +28,8 @@
 - 그래서 Claude가 install.ps1로 설치·실행한 기록 프로그램은 자동 시작 등록이 Windows에 안 보였고(작업 관리자 시작 앱에 없음, 로그인 때 실행 안 됨), 2026-11-26 16:32 Claude 앱 종료 때 같이 꺼졌다 → **24시간 측정 무효, v0.8.3 자동 시작 수정도 검증 안 됨**
 - 11-25 이후 기록 데이터는 `...\Packages\Claude_pzs8sxrjxfjjc\LocalCache\Local\UsageTracker\`에 있다 → 사용자가 Claude 밖에서 실제 폴더로 옮김
 - 2026-11-27 09:29 사용자가 Claude 밖에서 데이터 복사(robocopy) 후 기록 프로그램 직접 실행 (pid 17932, job 밖). 작업 관리자 시작 앱에 UsageTracker.exe "사용"으로 보임. 가상 사본은 `...\LocalCache\Local\UsageTracker.claude-virtual-backup-20261127`로 이름 바꿔 보관 (Claude 쪽 읽기가 실제 폴더를 보도록)
-- **새 24시간 측정: 2026-11-27 09:29:40 시작, 예약 작업이 2026-11-28 09:40에 판정 보고만** (v0.8.4·v0.8.5 설치는 그 뒤 사용자가 Claude 밖에서 install.ps1)
+- 사용자 결정: 측정은 v0.8.5 설치 뒤에. 2026-11-27 v0.8.4·v0.8.5 릴리스, PR #1 병합 완료. **설치는 사용자가 Claude 밖 PowerShell에서** `powershell -ExecutionPolicy Bypass -File .\tools\install.ps1 -NoBuild`
+- **새 24시간 측정: v0.8.5 첫 start부터, 예약 작업이 2026-11-28 10:30에 판정 보고만**
 - Claude 세션에서 `%LOCALAPPDATA%\UsageTracker`에 쓰면 가상 사본이 다시 생겨 읽기가 틀어진다 → 읽기만
 - **규칙: 실제 기록 프로그램 설치·실행은 사용자가 Claude 밖 PowerShell/탐색기에서 한다.** Claude는 `--data=<저장소 폴더>` 시험만 한다 (저장소 폴더는 가상화되지 않음)
 
