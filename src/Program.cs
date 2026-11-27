@@ -122,12 +122,7 @@ namespace UsageTracker
                     var earliest = DateTime.Now.AddMinutes(10);
                     nextUpdateCheck = due > earliest ? due : earliest;
                 }
-                Safe("update-cleanup", () =>
-                {
-                    // 업데이트 때 이름만 바꿔 둔 옛 실행 파일 정리
-                    foreach (var f in Directory.GetFiles(Path.GetDirectoryName(exePath), "UsageTracker.exe*.old"))
-                        try { File.Delete(f); } catch { }
-                });
+                CleanupOldExe();
                 UpdateTip();
                 Native.SetTimer(hwnd, TimerTickId, tickMs, IntPtr.Zero);
                 Native.SetTimer(hwnd, TimerFlushId, flushMs, IntPtr.Zero);
@@ -180,11 +175,30 @@ namespace UsageTracker
             return Ui.UiApp.Run(dir, args);
         }
 
-        /// <summary>트레이에서 화면 모드를 연다 (같은 exe를 --ui로 실행).</summary>
+        /// <summary>트레이에서 화면 모드를 연다 (같은 exe를 --ui로 실행). 셸을 거치지 않는다 (Native.StartProcess 참고).</summary>
         static void LaunchUi(string extra = "")
         {
             string args = "--ui" + extra + (manageAutoStart ? "" : " \"--data=" + dataDir + "\"");
-            Native.ShellExecute(IntPtr.Zero, "open", exePath, args, null, 1);
+            if (!Native.StartProcess(exePath, "\"" + exePath + "\" " + args, Path.GetDirectoryName(exePath)))
+                Native.ShellExecute(IntPtr.Zero, "open", exePath, args, null, 1);   // 만일을 위한 대비
+        }
+
+        static bool oldExePending = true;
+
+        /// <summary>
+        /// 업데이트 때 이름만 바꿔 둔 옛 실행 파일(UsageTracker.exe*.old)을 지운다. 업데이트 직후 시작하면 옛 프로세스가
+        /// 아직 끝나는 중이라 지우지 못할 수 있어서, 다 지울 때까지 주기 작업(1분)마다 다시 해 본다.
+        /// </summary>
+        static void CleanupOldExe()
+        {
+            if (!oldExePending) return;
+            Safe("update-cleanup", () =>
+            {
+                bool left = false;
+                foreach (var f in Directory.GetFiles(Path.GetDirectoryName(exePath), "UsageTracker.exe*.old"))
+                    try { File.Delete(f); } catch { left = true; }
+                oldExePending = left;
+            });
         }
 
         static void CreateWindow()
@@ -311,6 +325,7 @@ namespace UsageTracker
                 UpdateIdleTimer();
                 UpdateTip();   // 오늘 사용 시간 (분 단위라 1분에 한 번이면 충분)
                 Safe("update", MaybeCheckUpdate);
+                CleanupOldExe();
                 Native.TrimMemory();
             }
             else if (id == TimerIdleId)
@@ -391,7 +406,14 @@ namespace UsageTracker
                     break;
                 case Tray.CmdErrors:
                     if (ErrorLog.FilePath != null && File.Exists(ErrorLog.FilePath))
-                        Native.ShellExecute(IntPtr.Zero, "open", "notepad.exe", "\"" + ErrorLog.FilePath + "\"", null, 1);
+                    {
+                        string q = "\"" + ErrorLog.FilePath + "\"";
+                        if (!Native.StartProcess(null, "notepad.exe " + q, null))
+                            Native.ShellExecute(IntPtr.Zero, "open", "notepad.exe", q, null, 1);
+                    }
+                    break;
+                case Tray.CmdUpdateCheck:
+                    LaunchUi(" --update-check --manual");   // 결과(새 버전 없음 포함)를 창으로 알려 준다
                     break;
                 case Tray.CmdOpen:
                     LaunchUi();

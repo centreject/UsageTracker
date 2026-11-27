@@ -137,6 +137,35 @@ namespace UsageTracker
         [DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern bool PostMessage(IntPtr hwnd, uint msg, IntPtr wParam, IntPtr lParam);
         [DllImport("shell32.dll", CharSet = CharSet.Unicode)] public static extern bool Shell_NotifyIcon(uint msg, ref NOTIFYICONDATA data);
         [DllImport("shell32.dll", CharSet = CharSet.Unicode)] public static extern IntPtr ShellExecute(IntPtr hwnd, string op, string file, string args, string dir, int show);
+
+        [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+        struct STARTUPINFO
+        {
+            public int cb; public string lpReserved, lpDesktop, lpTitle;
+            public int dwX, dwY, dwXSize, dwYSize, dwXCountChars, dwYCountChars, dwFillAttribute, dwFlags;
+            public short wShowWindow, cbReserved2; public IntPtr lpReserved2, hStdInput, hStdOutput, hStdError;
+        }
+        [StructLayout(LayoutKind.Sequential)] struct PROCESS_INFORMATION { public IntPtr hProcess, hThread; public int dwProcessId, dwThreadId; }
+        [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+        static extern bool CreateProcess(string app, StringBuilder cmdLine, IntPtr procAttr, IntPtr threadAttr, bool inherit,
+            uint flags, IntPtr env, string dir, ref STARTUPINFO si, out PROCESS_INFORMATION pi);
+        [DllImport("user32.dll")] static extern bool AllowSetForegroundWindow(int pid);
+
+        /// <summary>
+        /// 프로그램을 바로 실행한다. ShellExecute는 기록 모드에 셸 확장 DLL 10여 개를 불러와 작업 집합이 15MB쯤 늘고
+        /// 핸들이 70개 넘게 늘어서(한 번 불러오면 그대로 남음), 기록 모드에서는 이것을 쓴다.
+        /// exe가 null이면 cmdLine 첫 단어로 시스템 폴더·PATH에서 찾는다 (notepad.exe 등). 실패하면 false.
+        /// </summary>
+        public static bool StartProcess(string exe, string cmdLine, string dir)
+        {
+            var si = new STARTUPINFO { cb = Marshal.SizeOf(typeof(STARTUPINFO)) };
+            PROCESS_INFORMATION pi;
+            if (!CreateProcess(exe, new StringBuilder(cmdLine), IntPtr.Zero, IntPtr.Zero, false, 0, IntPtr.Zero, dir, ref si, out pi)) return false;
+            AllowSetForegroundWindow(pi.dwProcessId);   // 새 창이 앞으로 나올 수 있게
+            CloseHandle(pi.hThread);
+            CloseHandle(pi.hProcess);
+            return true;
+        }
         [DllImport("wtsapi32.dll")] public static extern bool WTSRegisterSessionNotification(IntPtr hwnd, int flags);
         [DllImport("wtsapi32.dll")] public static extern bool WTSUnRegisterSessionNotification(IntPtr hwnd);
         [DllImport("dwmapi.dll")] public static extern int DwmGetWindowAttribute(IntPtr hwnd, int attr, out int value, int size);
