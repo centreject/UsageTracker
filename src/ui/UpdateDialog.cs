@@ -15,7 +15,7 @@ namespace UsageTracker.Ui
     /// <summary>새 버전 안내 팝업: 지금 업데이트 / 나중에, "이 버전은 다시 알리지 않기".</summary>
     sealed class UpdateDialog : Form
     {
-        readonly CheckBox skip = new CheckBox { Text = "이 버전은 다시 알리지 않기 (더 새 버전이 나오면 다시 알려요)", AutoSize = true };
+        readonly CheckBox skip = new CheckBox { Text = "이 버전은 다시 알리지 않기 (더 새 버전이 나오면 다시 알립니다)", AutoSize = true };
         public bool SkipThisVersion { get { return skip.Checked; } }
 
         public UpdateDialog(Theme theme, Version current, Version latest, string notes, string url)
@@ -32,8 +32,8 @@ namespace UsageTracker.Ui
             try { Icon = Icon.ExtractAssociatedIcon(Application.ExecutablePath); } catch { }
 
             var root = new TableLayoutPanel { AutoSize = true, ColumnCount = 1, Padding = new Padding(20, 16, 20, 16) };
-            root.Controls.Add(new Label { Text = "새 버전이 있어요", Font = new Font(Font.FontFamily, Font.Size * 1.3f, FontStyle.Bold), AutoSize = true, Margin = new Padding(0, 0, 0, 8) });
-            root.Controls.Add(new Label { Text = "v" + latest.ToString(3) + "  (지금 v" + current.ToString(3) + ")", AutoSize = true });
+            root.Controls.Add(new Label { Text = "새 버전이 있습니다", Font = new Font(Font.FontFamily, Font.Size * 1.3f, FontStyle.Bold), AutoSize = true, Margin = new Padding(0, 0, 0, 8) });
+            root.Controls.Add(new Label { Text = "v" + latest.ToString(3) + "  (현재 v" + current.ToString(3) + ")", AutoSize = true });
             string body = (notes ?? "").Trim();
             if (body.Length > 800) body = body.Substring(0, 800) + " …";
             if (body.Length > 0)
@@ -44,7 +44,7 @@ namespace UsageTracker.Ui
                 link.LinkClicked += (s, e) => { try { Process.Start(url); } catch { } };
                 root.Controls.Add(link);
             }
-            root.Controls.Add(new Label { Text = "업데이트하면 기록 프로그램을 잠깐 껐다 켜요. 기록은 그대로 남아요.", AutoSize = true, Tag = "subtle", MaximumSize = new Size(420, 0), Margin = new Padding(0, 6, 0, 6) });
+            root.Controls.Add(new Label { Text = "업데이트하면 기록 프로그램을 잠시 종료했다가 다시 실행합니다. 기록은 그대로 유지됩니다.", AutoSize = true, Tag = "subtle", MaximumSize = new Size(420, 0), Margin = new Padding(0, 6, 0, 6) });
             root.Controls.Add(skip);
 
             var buttons = new FlowLayoutPanel { AutoSize = true, FlowDirection = FlowDirection.RightToLeft, Dock = DockStyle.Fill, Margin = new Padding(0, 14, 0, 0) };

@@ -83,7 +83,7 @@ namespace UsageTracker.Ui
                 {
                     Process.Start(Application.ExecutablePath, "--ui --update-check --manual" + (devMode ? " \"--data=" + dataDir + "\"" : ""));
                 }
-                catch (Exception ex) { MessageBox.Show(this, "업데이트 확인을 시작하지 못했어요: " + ex.Message, "업데이트"); }
+                catch (Exception ex) { MessageBox.Show(this, "업데이트 확인을 시작하지 못했습니다: " + ex.Message, "업데이트"); }
             };
             root.Controls.Add(checkNow);
             var st = UpdateState.Load(dataDir);

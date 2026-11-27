@@ -55,7 +55,7 @@ namespace UsageTracker.Ui
             catch (Exception ex)
             {
                 ErrorLog.Write("update", ex);
-                if (manual) Message("업데이트를 확인하지 못했어요.\n" + ex.Message, MessageBoxIcon.Warning);
+                if (manual) Message("업데이트를 확인하지 못했습니다.\n" + ex.Message, MessageBoxIcon.Warning);
                 return 0;
             }
             state.LastCheck = now;
@@ -83,13 +83,13 @@ namespace UsageTracker.Ui
             {
                 Apply(latest, dataDir, devMode);
                 if (testAutoYes) ErrorLog.Write("update-test", new Exception("updated to " + latest.Version.ToString(3)));
-                else Message("v" + latest.Version.ToString(3) + "(으)로 업데이트했어요.", MessageBoxIcon.Information);
+                else Message("v" + latest.Version.ToString(3) + "(으)로 업데이트했습니다.", MessageBoxIcon.Information);
                 return 0;
             }
             catch (Exception ex)
             {
                 ErrorLog.Write("update", ex);
-                if (!testAutoYes) Message("업데이트하지 못했어요. 기존 버전을 그대로 써요.\n" + ex.Message, MessageBoxIcon.Warning);
+                if (!testAutoYes) Message("업데이트하지 못했습니다. 기존 버전을 그대로 사용합니다.\n" + ex.Message, MessageBoxIcon.Warning);
                 return 1;
             }
         }
@@ -182,7 +182,7 @@ namespace UsageTracker.Ui
             if (rel.ZipUrl == null || rel.ShaUrl == null)
             {
                 try { Process.Start(rel.HtmlUrl); } catch { }
-                throw new Exception("이 릴리스에는 자동 업데이트용 파일이 없어요. 릴리스 페이지에서 직접 받아 주세요.");
+                throw new Exception("이 릴리스에는 자동 업데이트용 파일이 없습니다. 릴리스 페이지에서 직접 받아 주십시오.");
             }
             string work = Path.Combine(Path.GetTempPath(), "UsageTracker-update-" + rel.Version.ToString(3));
             if (Directory.Exists(work)) Directory.Delete(work, true);
@@ -197,7 +197,7 @@ namespace UsageTracker.Ui
                 string sha = wc.DownloadString(rel.ShaUrl);
                 string expected = sha.Trim().Split(new[] { ' ', '\t', '\r', '\n', '*' }, StringSplitOptions.RemoveEmptyEntries)[0];
                 if (!string.Equals(expected, Sha256(zip), StringComparison.OrdinalIgnoreCase))
-                    throw new Exception("받은 파일의 확인 값(SHA-256)이 맞지 않아요.");
+                    throw new Exception("받은 파일의 확인 값(SHA-256)이 맞지 않습니다.");
             }
 
             string newExe = Path.Combine(work, "UsageTracker.exe"), newCfg = Path.Combine(work, "UsageTracker.exe.config");
@@ -207,9 +207,9 @@ namespace UsageTracker.Ui
                     if (string.Equals(e.Name, "UsageTracker.exe", StringComparison.OrdinalIgnoreCase)) e.ExtractToFile(newExe, true);
                     else if (string.Equals(e.Name, "UsageTracker.exe.config", StringComparison.OrdinalIgnoreCase)) e.ExtractToFile(newCfg, true);
                 }
-            if (!File.Exists(newExe)) throw new Exception("받은 파일에 UsageTracker.exe가 없어요.");
+            if (!File.Exists(newExe)) throw new Exception("받은 파일에 UsageTracker.exe가 없습니다.");
             string got = FileVersionInfo.GetVersionInfo(newExe).ProductVersion ?? "";
-            if (!got.StartsWith(rel.Version.ToString(3))) throw new Exception("받은 프로그램의 버전(" + got + ")이 릴리스와 달라요.");
+            if (!got.StartsWith(rel.Version.ToString(3))) throw new Exception("받은 프로그램의 버전(" + got + ")이 릴리스와 다릅니다.");
 
             string dir = Path.GetDirectoryName(Application.ExecutablePath);
             string exe = Path.Combine(dir, "UsageTracker.exe");
@@ -221,7 +221,7 @@ namespace UsageTracker.Ui
         internal static void Replace(string exe, string newExe, string newCfg, string dataDir, bool devMode)
         {
             Recorder.CloseAndWait(10000);
-            if (RecorderLink.Find(dataDir) != IntPtr.Zero) throw new Exception("기록 프로그램이 끝나지 않았어요.");
+            if (RecorderLink.Find(dataDir) != IntPtr.Zero) throw new Exception("기록 프로그램이 종료되지 않았습니다.");
 
             // 실행 중인 exe(이 프로세스, 열려 있는 통계 창)는 덮어쓸 수 없지만 이름은 바꿀 수 있다
             string old = exe + ".old";
