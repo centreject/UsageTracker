@@ -136,6 +136,8 @@ namespace UsageTracker.Ui
             var save = new Button { Text = "저장", AutoSize = true, MinimumSize = new Size(80, 30) };
             var close = new Button { Text = "닫기", DialogResult = DialogResult.Cancel, AutoSize = true, MinimumSize = new Size(80, 30) };
             save.Click += (s, e) => { Save(); Close(); };
+            // 트레이 "설정..."은 이 창을 단독 창(Application.Run)으로 띄운다. 그때는 DialogResult만으로 닫히지 않으므로 직접 닫는다 (Esc도 이 버튼)
+            close.Click += (s, e) => Close();
             buttons.Controls.Add(close);
             buttons.Controls.Add(save);
             root.Controls.Add(buttons);
