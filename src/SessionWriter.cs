@@ -168,6 +168,26 @@ namespace UsageTracker
 
         // ---------- 앱 정보 (appinfo.tsv: 기록 모드만 쓴다) ----------
 
+        /// <summary>오늘 이미 기록된(닫힌) PC 사용(U) 시간(초). 기록 모드 시작 때 트레이 툴팁용으로 한 번 읽는다.</summary>
+        public static double TodayUsedSeconds(string dir, DateTime now)
+        {
+            string f = FileFor(dir, now);
+            if (!File.Exists(f)) return 0;
+            DateTime today = now.Date, tomorrow = today.AddDays(1);
+            double sum = 0;
+            foreach (var line in AtomicFile.ReadAllLinesShared(f))
+            {
+                if (line.Length < 2 || line[0] != 'U' || line[1] != '\t') continue;
+                var p = line.Split('\t');
+                DateTime a, b;
+                if (p.Length < 3 || !TryParse(p[1], out a) || !TryParse(p[2], out b)) continue;
+                if (a < today) a = today;
+                if (b > tomorrow) b = tomorrow;
+                if (b > a) sum += (b - a).TotalSeconds;
+            }
+            return sum;
+        }
+
         public Dictionary<string, AppInfo> LoadAppInfo()
         {
             var d = new Dictionary<string, AppInfo>(StringComparer.OrdinalIgnoreCase);

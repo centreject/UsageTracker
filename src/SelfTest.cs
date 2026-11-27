@@ -32,6 +32,8 @@ namespace UsageTracker
             public bool IsFullscreen(IntPtr hwnd) { return Full; }
             public HashSet<string> AudioApps() { return new HashSet<string>(Audio, StringComparer.OrdinalIgnoreCase); }
             public HashSet<string> VisibleApps() { return new HashSet<string>(Visible, StringComparer.OrdinalIgnoreCase); }
+            public string Watched;           // 다른 모니터에 보이는 창으로 소리를 내는 앱 (시청 시험)
+            public string WatchedApp(IntPtr fg, HashSet<string> audio) { return Watched != null && audio.Contains(Watched) ? Watched : null; }
             public string NameOf(string id) { return id; }
             public List<AppInfo> NewApps { get { return none; } }
             public void ResetApps() { }
@@ -86,6 +88,9 @@ namespace UsageTracker
                 { "T35 UWP 지연 인식·보조 모니터 최대화 판정", T35_UwpRetryAndFullscreen },
                 { "T36 IPC 서명 검증·절전 중복 방지", T36_IpcAndSuspend },
                 { "T37 저장 중간 실패 후 재시도 시 중복 없음", T37_FlushPartialFailure },
+                { "T38 기록 제외 앱", T38_Exclude },
+                { "T39 보조 모니터 시청", T39_WatchOtherMonitor },
+                { "T40 오늘 사용 시간 (트레이 툴팁)", T40_TodayUsed },
             };
             foreach (var kv in tests)
             {
@@ -665,6 +670,85 @@ namespace UsageTracker
             Near("바탕화면 활성은 기록", 60, Get(s.Active, AppResolver.DesktopId));
             True("탐색기 실행 시간 없음", Get(s.Running, "explorer.exe") == 0);
             True("바탕화면 실행 시간 없음", Get(s.Running, AppResolver.DesktopId) == 0);
+        }
+
+        static void T38_Exclude()
+        {
+            var env = NewEnv(); string dir = NewDir();
+            env.Fg = "game.exe"; env.Visible.Add("game.exe"); env.Visible.Add("b.exe");
+            var t = new Tracker(env, new SessionWriter(dir)) { IdleThresholdMs = 300 * 1000, TickIntervalMs = 60 * 1000 };
+            t.SetExcluded(new[] { "GAME.exe" });  // 시작 전 지정 (대소문자 무시)
+            t.Start();
+            env.At(60); t.Tick(); env.At(120); t.Tick();
+            env.Fg = "a.exe"; t.OnForeground((IntPtr)1);   // 다른 앱으로
+            env.At(180); t.Tick();
+            t.SetExcluded(new[] { "game.exe", "a.exe" });  // 기록 중에 a.exe도 제외
+            env.At(240); t.Tick();
+            t.SetExcluded(new string[0]);                   // 제외 해제
+            env.At(300); t.Tick();
+            t.Shutdown();
+            var s = Sum(dir, env.Base);
+            Near("제외 앱 활성 0", 0, Get(s.Active, "game.exe"));
+            Near("제외 앱 실행: 제외 해제 뒤 60초만", 60, Get(s.Running, "game.exe"));
+            Near("다른 앱 실행은 그대로", 300, Get(s.Running, "b.exe"));
+            Near("기록 중 제외: 앞 60초 + 해제 뒤 60초", 120, Get(s.Active, "a.exe"));
+            Near("제외해도 PC 사용 시간은 그대로", 300, s.PcUsed);
+        }
+
+        static void T39_WatchOtherMonitor()
+        {
+            var env = NewEnv(); string dir = NewDir();
+            env.Fg = "a.exe"; env.Audio.Add("v.exe"); env.Watched = "v.exe";
+            var t = NewTracker(env, dir);
+            env.At(100);                          // 마지막 입력, 이후 보조 모니터 영상 시청
+            TicksTo(env, t, 700);
+            True("보조 모니터 시청 중 자리 비움 아님", !t.IsIdle && t.NeedsIdlePoll);
+            env.At(710); True("입력 돌아옴", t.IdlePoll());
+            True("시청 끝나면 짧은 확인 중지", !t.NeedsIdlePoll);
+            env.At(760); t.Tick();
+            t.Shutdown();
+            var s = Sum(dir, env.Base);
+            Near("영상 앱 활성: 마지막 입력(100)부터 입력 복귀(710)까지", 610, Get(s.Active, "v.exe"));
+            Near("맨 앞 앱 활성: 0–100 + 710–760", 150, Get(s.Active, "a.exe"));
+            Near("PC 사용 시간 이어짐", 760, s.PcUsed);
+
+            // 시청 중 소리가 끝나면 자리 비움 (마지막으로 소리를 확인한 때까지 인정)
+            var env2 = NewEnv(); string dir2 = NewDir();
+            env2.Fg = "a.exe"; env2.Audio.Add("v.exe"); env2.Watched = "v.exe";
+            var t2 = NewTracker(env2, dir2);
+            env2.At(100);
+            TicksTo(env2, t2, 600);
+            env2.Audio.Clear();
+            TicksTo(env2, t2, 700);
+            True("소리 끝나면 자리 비움", t2.IsIdle);
+            t2.Shutdown();
+            Near("영상 앱 활성: 100–600", 500, Get(Sum(dir2, env2.Base).Active, "v.exe"));
+
+            // 가려지거나 같은 모니터라 시청이 아니면(Watched 없음) 기존대로 자리 비움
+            var env3 = NewEnv(); string dir3 = NewDir();
+            env3.Fg = "a.exe"; env3.Audio.Add("music.exe");
+            var t3 = NewTracker(env3, dir3);
+            env3.At(100);
+            TicksTo(env3, t3, 500);
+            True("배경음악만 있으면 자리 비움", t3.IsIdle);
+            t3.Shutdown();
+            Near("배경음악 앱 활성 없음", 0, Get(Sum(dir3, env3.Base).Active, "music.exe"));
+        }
+
+        static void T40_TodayUsed()
+        {
+            var env = NewEnv(23, 58); string dir = NewDir();
+            env.Visible.Add("a.exe");
+            var t = NewTracker(env, dir);
+            env.At(60); t.Tick();
+            Near("열린 사용 시간 포함", 60, t.TodayUsedSeconds());
+            env.At(180); t.Tick();                // 자정(120초) 지나 날짜 바뀜
+            Near("자정 뒤에는 오늘 것만", 60, t.TodayUsedSeconds());
+            t.Shutdown();
+            Near("파일에서 읽은 오늘 사용 시간", 60, SessionWriter.TodayUsedSeconds(dir, env.Now()));
+            var t2 = new Tracker(env, new SessionWriter(dir));
+            t2.SeedTodayUsed(env.Now(), SessionWriter.TodayUsedSeconds(dir, env.Now()));
+            Near("다시 시작해도 이어짐", 60, t2.TodayUsedSeconds());
         }
 
         static void T31_IdleAfterAudio()

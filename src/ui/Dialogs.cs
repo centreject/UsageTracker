@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.Drawing;
 using System.IO;
@@ -65,6 +66,14 @@ namespace UsageTracker.Ui
         readonly NumericUpDown idle = new NumericUpDown { Minimum = 1, Maximum = 120, Width = 70 };
         readonly CheckBox autoStart = new CheckBox { Text = "Windows 시작 시 실행", AutoSize = true };
         bool autoStartInitially;
+        List<string> excluded = new List<string>();
+        readonly ListBox excludeList = new ListBox { SelectionMode = SelectionMode.MultiExtended, BorderStyle = BorderStyle.FixedSingle, IntegralHeight = false };
+
+        sealed class ExcludeItem
+        {
+            public string Id, Name;
+            public override string ToString() { return Name; }
+        }
 
         /// <summary>전체 초기화나 제거 준비를 했으면 true (메인 창이 다시 읽거나 닫는다).</summary>
         public bool DataChanged, Uninstalled;
@@ -96,7 +105,7 @@ namespace UsageTracker.Ui
             idleRow.Controls.Add(idle);
             idleRow.Controls.Add(new Label { Text = "분 동안 입력이 없으면", AutoSize = true, Margin = new Padding(6, 6, 0, 0) });
             root.Controls.Add(idleRow);
-            root.Controls.Add(Note("소리가 나거나 전체 화면이면 입력이 없어도 사용 중으로 봐요."));
+            root.Controls.Add(Note("소리가 나거나 전체 화면이면, 또는 다른 모니터에서 소리 나는 창을 보고 있으면 입력이 없어도 사용 중으로 봐요. 게임패드 입력도 사용으로 쳐요."));
 
             // 실제로 자동 시작되는지 보여 준다: Windows 설정 → 시작 앱에서 꺼 두었으면 체크 해제로 보인다
             bool winOff = !devMode && AutoStart.DisabledInWindows();
@@ -109,6 +118,32 @@ namespace UsageTracker.Ui
             if (devMode) root.Controls.Add(Note("시험용 데이터 폴더로 실행 중이라 자동 시작은 바꿀 수 없어요."));
             else if (winOff && settings.AutoStart)
                 root.Controls.Add(Note("Windows 설정 → 앱 → 시작 앱에서 꺼 둔 상태예요. 여기서 켜고 저장하면 다시 켜져요."));
+
+            // 기록 제외: 목록에서 고른 앱을 다시 기록하게 할 수 있다 (저장할 때 적용)
+            root.Controls.Add(Header("기록 제외", bold));
+            excluded = settings.Exclude;
+            if (excluded.Count == 0)
+                root.Controls.Add(Note("기록하지 않는 앱이 없어요. 통계 창 목록에서 앱을 오른쪽 클릭 → '앞으로 기록하지 않기'로 지정해요."));
+            else
+            {
+                var catalog = new AppCatalog(dataDir);
+                excludeList.Width = 300;
+                excludeList.Height = Math.Min(6, excluded.Count) * excludeList.ItemHeight + 6;
+                foreach (var id in excluded) excludeList.Items.Add(new ExcludeItem { Id = id, Name = catalog.DisplayName(id) });
+                excludeList.BackColor = theme.Dark ? theme.Panel : Color.White;
+                excludeList.ForeColor = theme.Text;
+                excludeList.Margin = new Padding(0, 0, 0, 4);
+                root.Controls.Add(excludeList);
+                var include = new Button { Text = "선택한 앱 다시 기록", AutoSize = true, Margin = new Padding(0, 2, 0, 0) };
+                include.Click += (s, e) =>
+                {
+                    var sel = new List<object>();
+                    foreach (var o in excludeList.SelectedItems) sel.Add(o);
+                    foreach (var o in sel) excludeList.Items.Remove(o);
+                };
+                root.Controls.Add(include);
+                root.Controls.Add(Note("지난 기록은 남아 있어요. 저장하면 바로 적용돼요."));
+            }
 
             root.Controls.Add(Header("데이터", bold));
             var folder = new LinkLabel { Text = dataDir, AutoSize = true, MaximumSize = new Size(420, 0), Margin = new Padding(0, 0, 0, 4) };
@@ -154,6 +189,15 @@ namespace UsageTracker.Ui
         {
             settings.IdleMinutes = (int)idle.Value;
             if (!devMode) settings.AutoStart = autoStart.Checked;
+            if (excluded.Count > 0)
+            {
+                // 다른 창에서 그사이 더한 제외 앱은 지우지 않도록, 이 창에서 뺀 것만 빼서 저장
+                var keep = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                foreach (ExcludeItem it in excludeList.Items) keep.Add(it.Id);
+                var latest = new Settings(dataDir).Exclude;
+                settings.Exclude = latest.FindAll(id => keep.Contains(id) || !excluded.Contains(id));
+            }
+            else settings.Exclude = new Settings(dataDir).Exclude;
             settings.Save();
             // 사용자가 이 창에서 직접 켰으면 Windows 쪽 "사용 안 함"도 다시 켠다
             if (!devMode && autoStart.Checked && !autoStartInitially)

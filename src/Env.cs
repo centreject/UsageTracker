@@ -15,6 +15,7 @@ namespace UsageTracker
         bool IsFullscreen(IntPtr hwnd);
         HashSet<string> AudioApps();              // 소리 내는 앱 ID
         HashSet<string> VisibleApps();            // 보이는 창이 있는 앱 ID
+        string WatchedApp(IntPtr fg, HashSet<string> audioApps);   // 입력 없이 다른 모니터에서 보고 있는 앱 (없으면 null)
         string NameOf(string appId);
         List<AppInfo> NewApps { get; }
         void ResetApps();                         // 전체 초기화 후 앱 정보를 처음부터 다시 모은다
@@ -30,7 +31,7 @@ namespace UsageTracker
 
         public long Ts() { return Stopwatch.GetTimestamp(); }
         public DateTime Now() { return DateTime.Now; }
-        public uint IdleMs() { return Native.IdleMilliseconds(); }
+        public uint IdleMs() { return Math.Min(Native.IdleMilliseconds(), Gamepad.MsSinceInput()); }
         public IntPtr Foreground() { return Native.GetForegroundWindow(); }
         public string AppOf(IntPtr hwnd) { return apps.ForegroundApp(hwnd); }
         public string NameOf(string appId) { return apps.NameOf(appId); }
@@ -93,6 +94,43 @@ namespace UsageTracker
             }
             catch (Exception ex) { ErrorLog.Write("cli", ex); }
             return set;
+        }
+
+        /// <summary>
+        /// 입력이 없을 때 "보고 있는" 앱: 소리를 내는 앱 가운데, 맨 앞 창과 다른 모니터에 최소화되지 않은 창이 있고
+        /// 그 창 가운데가 다른 창에 가려지지 않은 앱. 최소화·가려진 앱의 배경음악은 해당하지 않는다.
+        /// 자리 비움 기준을 넘었을 때만 불리므로 평소 부담은 없다.
+        /// </summary>
+        public string WatchedApp(IntPtr fg, HashSet<string> audioApps)
+        {
+            if (audioApps == null || audioApps.Count == 0) return null;
+            IntPtr fgMon = fg == IntPtr.Zero ? IntPtr.Zero : Native.MonitorFromWindow(fg, 2 /*NEAREST*/);
+            string found = null;
+            var cache = pathCache;
+            Native.EnumWindows((h, l) =>
+            {
+                if (!Native.IsWindowVisible(h) || Native.IsIconic(h) || Native.GetWindow(h, Native.GW_OWNER) != IntPtr.Zero) return true;
+                if ((Native.GetWindowLong(h, Native.GWL_EXSTYLE) & Native.WS_EX_TOOLWINDOW) != 0) return true;
+                int cloaked;
+                if (Native.DwmGetWindowAttribute(h, Native.DWMWA_CLOAKED, out cloaked, 4) == 0 && cloaked != 0) return true;
+                if (fgMon != IntPtr.Zero && Native.MonitorFromWindow(h, 2) == fgMon) return true;   // 맨 앞 창과 같은 모니터는 제외
+                Native.RECT r;
+                if (!Native.GetWindowRect(h, out r) || r.Right - r.Left < 200 || r.Bottom - r.Top < 150) return true;
+                var center = new Native.POINT { X = (r.Left + r.Right) / 2, Y = (r.Top + r.Bottom) / 2 };
+                if (Native.GetAncestor(Native.WindowFromPoint(center), Native.GA_ROOT) != h) return true;   // 가려짐
+
+                uint pid = Native.WindowPid(h);
+                if (Native.ClassName(h) == "ApplicationFrameWindow")
+                {
+                    uint inner = AppResolver.InnerUwpPid(h, pid);
+                    if (inner == 0) return true;
+                    pid = inner;
+                }
+                string id = apps.RunningApp(pid, h, cache);
+                if (id != null && audioApps.Contains(id)) { found = id; return false; }
+                return true;
+            }, IntPtr.Zero);
+            return found;
         }
 
         public bool IsFullscreen(IntPtr hwnd)

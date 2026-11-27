@@ -26,8 +26,8 @@ namespace UsageTracker.Ui
         public string Selected;
         public event Action<string> SegmentClicked;
 
-        readonly float k;   // 화면 배율
-        readonly int PadX, BarTop, BarH, AxisH, LegendH;
+        float k;   // 화면 배율 (모니터를 옮기면 바뀐다)
+        int PadX, BarTop, BarH, AxisH, LegendH;
         const double MinSpanMin = 10;
 
         Point downAt; bool dragging, suppressClick; DateTime dragStartView;
@@ -35,10 +35,23 @@ namespace UsageTracker.Ui
         public TimelineControl()
         {
             SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.UserPaint | ControlStyles.ResizeRedraw, true);
-            using (var g = Graphics.FromHwnd(IntPtr.Zero)) k = g.DpiY / 96f;
+            Rescale();
+            viewStart = DateTime.Today; viewEnd = viewStart.AddDays(1);
+        }
+
+        void Rescale()
+        {
+            k = DeviceDpi / 96f;
             PadX = S(12); BarTop = S(6); BarH = S(34); AxisH = S(18); LegendH = S(20);
             Height = BarTop + BarH + AxisH + LegendH + S(6);
-            viewStart = DateTime.Today; viewEnd = viewStart.AddDays(1);
+        }
+
+        /// <summary>배율이 다른 모니터로 옮기면 여백·높이를 다시 정한다.</summary>
+        protected override void OnDpiChangedAfterParent(EventArgs e)
+        {
+            base.OnDpiChangedAfterParent(e);
+            Rescale();
+            Invalidate();
         }
 
         int S(int v) { return (int)Math.Round(v * k); }
@@ -273,15 +286,27 @@ namespace UsageTracker.Ui
         public Color BarColor = Color.Empty;
         public string Caption = "";
 
-        readonly float k;
-        readonly int PadR, PadT, PadB;
+        float k;
+        int PadR, PadT, PadB;
         int PadL = 52;   // 세로축 글자 폭에 맞춰 그릴 때마다 다시 정한다
 
         public HourlyChart()
         {
             SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.UserPaint | ControlStyles.ResizeRedraw, true);
-            using (var g = Graphics.FromHwnd(IntPtr.Zero)) k = g.DpiY / 96f;
+            Rescale();
+        }
+
+        void Rescale()
+        {
+            k = DeviceDpi / 96f;
             PadR = S(12); PadT = S(26); PadB = S(20);
+        }
+
+        protected override void OnDpiChangedAfterParent(EventArgs e)
+        {
+            base.OnDpiChangedAfterParent(e);
+            Rescale();
+            Invalidate();
         }
 
         int S(int v) { return (int)Math.Round(v * k); }

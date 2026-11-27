@@ -112,6 +112,10 @@ namespace UsageTracker
         [DllImport("user32.dll")] public static extern IntPtr GetDesktopWindow();
         [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr hwnd, out RECT r);
         [DllImport("user32.dll")] public static extern IntPtr MonitorFromWindow(IntPtr hwnd, uint flags);
+        [DllImport("user32.dll")] public static extern bool IsIconic(IntPtr hwnd);
+        [DllImport("user32.dll")] public static extern IntPtr WindowFromPoint(POINT p);
+        [DllImport("user32.dll")] public static extern IntPtr GetAncestor(IntPtr hwnd, uint flags);
+        public const uint GA_ROOT = 2;
         [DllImport("user32.dll")] public static extern bool GetMonitorInfo(IntPtr mon, ref MONITORINFO mi);
         [DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern ushort RegisterClassEx(ref WNDCLASSEX wc);
         [DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern IntPtr CreateWindowEx(uint exStyle, string cls, string title, uint style, int x, int y, int w, int h, IntPtr parent, IntPtr menu, IntPtr inst, IntPtr param);

@@ -37,6 +37,34 @@ namespace UsageTracker
             set { values["autoStart"] = value ? "1" : "0"; }
         }
 
+        /// <summary>기록하지 않을 앱 ID (소문자, 예: game.exe, cli:node.exe). 앞으로만 적용된다.</summary>
+        public List<string> Exclude
+        {
+            get
+            {
+                string s;
+                var list = new List<string>();
+                if (values.TryGetValue("exclude", out s))
+                    foreach (var part in s.Split('|'))
+                    {
+                        string id = part.Trim().ToLowerInvariant();
+                        if (id.Length > 0 && !list.Contains(id)) list.Add(id);
+                    }
+                return list;
+            }
+            set
+            {
+                var clean = new List<string>();
+                if (value != null)
+                    foreach (var v in value)
+                    {
+                        string id = (v ?? "").Trim().ToLowerInvariant().Replace("|", "");
+                        if (id.Length > 0 && !clean.Contains(id)) clean.Add(id);
+                    }
+                values["exclude"] = string.Join("|", clean.ToArray());
+            }
+        }
+
         int GetInt(string key, int def, int min, int max)
         {
             string s; int v;
@@ -49,6 +77,8 @@ namespace UsageTracker
             var sb = new StringBuilder();
             sb.Append("idleMinutes=").Append(IdleMinutes).Append("\r\n");
             sb.Append("autoStart=").Append(AutoStart ? 1 : 0).Append("\r\n");
+            var ex = Exclude;
+            if (ex.Count > 0) sb.Append("exclude=").Append(string.Join("|", ex.ToArray())).Append("\r\n");
             AtomicFile.WriteAllText(path, sb.ToString());
             IsNew = false;
         }

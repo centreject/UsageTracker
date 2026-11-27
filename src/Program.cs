@@ -109,6 +109,7 @@ namespace UsageTracker
                 tracker.IdleThresholdMs = idleSecOverride == 0 ? int.MaxValue
                     : (idleSecOverride > 0 ? idleSecOverride : settings.IdleMinutes * 60) * 1000;
                 tracker.TickIntervalMs = (int)tickMs;
+                tracker.SetExcluded(settings.Exclude);   // 시작 전이라 목록만 정해 둔다
 
                 CreateWindow();
                 taskbarCreated = Native.RegisterWindowMessage("TaskbarCreated");
@@ -121,6 +122,7 @@ namespace UsageTracker
                     winEvent, 0, 0, Native.WINEVENT_OUTOFCONTEXT | Native.WINEVENT_SKIPOWNPROCESS);
 
                 Safe("start", tracker.Start);
+                Safe("today", () => tracker.SeedTodayUsed(DateTime.Today, SessionWriter.TodayUsedSeconds(dataDir, DateTime.Now)));
                 UpdateTip();
                 Native.SetTimer(hwnd, TimerTickId, tickMs, IntPtr.Zero);
                 Native.SetTimer(hwnd, TimerFlushId, flushMs, IntPtr.Zero);
@@ -202,6 +204,8 @@ namespace UsageTracker
         static void UpdateTip()
         {
             string tip = "사용 시간 기록\n" + tracker.StatusText();
+            int min = (int)(tracker.TodayUsedSeconds() / 60);
+            if (min > 0) tip += "\n오늘 사용 " + (min >= 60 ? (min / 60) + "시간 " + (min % 60) + "분" : min + "분");
             if (tip == lastTip) return;
             lastTip = tip;
             tray.Update(tip);
@@ -288,11 +292,12 @@ namespace UsageTracker
             {
                 tracker.Tick();
                 UpdateIdleTimer();
+                UpdateTip();   // 오늘 사용 시간 (분 단위라 1분에 한 번이면 충분)
                 Native.TrimMemory();
             }
             else if (id == TimerIdleId)
             {
-                if (tracker.IdlePoll()) UpdateIdleTimer();
+                if (tracker.IdlePoll()) { UpdateIdleTimer(); UpdateTip(); }
             }
             else if (id == TimerFlushId)
             {
@@ -317,7 +322,7 @@ namespace UsageTracker
 
         static void UpdateIdleTimer()
         {
-            bool want = tracker.IsIdle;
+            bool want = tracker.NeedsIdlePoll;
             if (want == idleTimerOn) return;
             if (want) Native.SetTimer(hwnd, TimerIdleId, IdlePollMs, IntPtr.Zero);
             else Native.KillTimer(hwnd, TimerIdleId);
@@ -368,6 +373,7 @@ namespace UsageTracker
                     bool wasAuto = settings.AutoStart;
                     settings = new Settings(dataDir);
                     if (idleSecOverride < 0) tracker.IdleThresholdMs = settings.IdleMinutes * 60 * 1000;
+                    tracker.SetExcluded(settings.Exclude);
                     // 설정 창에서 자동 시작을 꺼짐→켜짐으로 바꿨을 때만 Windows 쪽 "사용 안 함"을 덮어쓴다
                     if (manageAutoStart) AutoStart.Apply(settings.AutoStart, exePath, settings.AutoStart && !wasAuto);
                     break;
