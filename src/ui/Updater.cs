@@ -64,7 +64,7 @@ namespace UsageTracker.Ui
             var latest = Pick(releases, current);
             if (latest == null || !UpdateState.ShouldNotify(current, latest.Version, state.SkipVersion, manual))
             {
-                if (manual) Message("지금 최신 버전(v" + current.ToString(3) + ")이에요.", MessageBoxIcon.Information);
+                if (manual) Message("현재 최신 버전(v" + current.ToString(3) + ")입니다.", MessageBoxIcon.Information);
                 return 0;
             }
 
