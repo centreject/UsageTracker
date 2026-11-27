@@ -89,9 +89,10 @@ namespace UsageTracker.Ui
             prevBtn.Text = "◀"; prevBtn.Width = 36;
             nextBtn.Text = "▶"; nextBtn.Width = 36;
             todayBtn.Text = "오늘"; todayBtn.Width = 56; todayBtn.Margin = new Padding(8, 3, 0, 3);
-            periodLabel.AutoSize = true;
+            periodLabel.AutoSize = false;   // 너비는 RefreshData에서 기간 종류별 고정값으로
+            periodLabel.TextAlign = ContentAlignment.MiddleCenter;
             periodLabel.Font = boldFont;
-            periodLabel.Margin = new Padding(8, 9, 8, 0);
+            periodLabel.Margin = new Padding(4, 3, 4, 3);
             prevBtn.Click += (s, e) => MovePeriod(-1);
             nextBtn.Click += (s, e) => MovePeriod(1);
             todayBtn.Click += (s, e) => { anchor = DateTime.Today; RefreshData(); };

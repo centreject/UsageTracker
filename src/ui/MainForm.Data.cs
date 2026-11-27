@@ -66,6 +66,27 @@ namespace UsageTracker.Ui
             }
         }
 
+        readonly Dictionary<Period, int> periodWidth = new Dictionary<Period, int>();
+
+        /// <summary>그 기간 종류에서 나올 수 있는 가장 긴 글자의 너비 (배율이 바뀌면 OnDpiRescale에서 비운다).</summary>
+        int PeriodLabelWidth()
+        {
+            int w;
+            if (periodWidth.TryGetValue(period, out w)) return w;
+            string[] samples;
+            switch (period)
+            {
+                case Period.Week: samples = new[] { "8888년 88월 88일 – 88월 88일" }; break;
+                case Period.Month: samples = new[] { "8888년 88월" }; break;
+                case Period.Year: samples = new[] { "8888년" }; break;
+                default: samples = "월화수목금토일".Select(d => "8888년 88월 88일 (" + d + ") · 오늘").ToArray(); break;
+            }
+            foreach (var s in samples) w = Math.Max(w, TextRenderer.MeasureText(s, periodLabel.Font).Width);
+            w += 4;
+            periodWidth[period] = w;
+            return w;
+        }
+
         // ---------- 데이터 ----------
 
         /// <summary>숨긴 앱을 모은 한 줄의 키.</summary>
@@ -103,6 +124,8 @@ namespace UsageTracker.Ui
             DateTime from, to;
             PeriodRange(out from, out to);
             periodLabel.Text = PeriodText(from, to);
+            // 기간 종류마다 가장 긴 글자에 맞춘 고정 너비: 앞뒤로 넘길 때 ◀ ▶ 버튼이 움직이지 않게
+            periodLabel.Size = new Size(Math.Max(PeriodLabelWidth(), TextRenderer.MeasureText(periodLabel.Text, periodLabel.Font).Width + 4), prevBtn.Height);
             nextBtn.Enabled = to <= DateTime.Today;
             todayBtn.Enabled = !IsCurrentPeriod();
 

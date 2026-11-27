@@ -186,6 +186,7 @@ namespace UsageTracker.Ui
             icons = new IconCache(iconSize);
             images.Images.Clear();
             images.ImageSize = new Size(iconSize, iconSize);
+            periodWidth.Clear();   // 기간 글자 칸 너비는 글꼴 크기에 따라 다시 잰다
             RefreshData();
         }
 
