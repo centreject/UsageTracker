@@ -9,6 +9,7 @@ namespace UsageTracker.Ui
     static class UiApp
     {
         [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern IntPtr FindWindow(string cls, string title);
+        [DllImport("user32.dll")] static extern bool IsIconic(IntPtr h);
         [DllImport("user32.dll")] static extern bool ShowWindow(IntPtr h, int cmd);
         [DllImport("user32.dll")] static extern bool SetForegroundWindow(IntPtr h);
 
@@ -64,7 +65,11 @@ namespace UsageTracker.Ui
         static void Activate(string title)
         {
             IntPtr h = FindWindow(null, title);
-            if (h != IntPtr.Zero) { ShowWindow(h, 9 /*SW_RESTORE*/); SetForegroundWindow(h); }
+            if (h != IntPtr.Zero)
+            {
+                if (IsIconic(h)) ShowWindow(h, 9 /*SW_RESTORE*/);
+                SetForegroundWindow(h);
+            }
         }
     }
 }

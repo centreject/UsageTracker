@@ -89,13 +89,14 @@ namespace UsageTracker
                 Line(s.Kind, from, midnight, s.AppId);
                 from = midnight;
             }
-            Line(s.Kind, from, end, s.AppId);
+            // 자정에서 정확히 끝난 구간(SplitAtMidnight 등)은 0초짜리 다음 날 줄을 쓰지 않는다.
+            if (from < end || from == s.Start) Line(s.Kind, from, end, s.AppId);
         }
 
         void Line(char kind, DateTime start, DateTime end, string appId)
         {
             Buf(start).Append(kind).Append('\t').Append(Fmt(start)).Append('\t').Append(Fmt(end))
-                .Append('\t').Append(appId ?? "-").Append("\r\n");
+                .Append('\t').Append(Clean(appId ?? "-")).Append("\r\n");
         }
 
         /// <summary>버퍼와 새로 열린 구간 표시, 저장 시점 표시를 파일에 덧붙인다.</summary>
@@ -105,28 +106,35 @@ namespace UsageTracker
             {
                 if (s.Logged) continue;
                 Buf(s.Start).Append("O\t").Append(s.Kind).Append('\t').Append(Fmt(s.Start))
-                    .Append('\t').Append(s.AppId ?? "-").Append("\r\n");
+                    .Append('\t').Append(Clean(s.AppId ?? "-")).Append("\r\n");
                 s.Logged = true;
             }
             Buf(now).Append("F\t").Append(Fmt(now)).Append("\r\n");
 
-            foreach (var kv in pending)
+            // 파일마다 쓴 즉시 버퍼에서 뺀다. 중간 파일에서 실패해도 이미 쓴 파일을 다음 저장 때 다시 쓰지 않게
+            foreach (var f in new List<string>(pending.Keys))
             {
-                if (kv.Value.Length == 0) continue;
-                bool isNew = !File.Exists(kv.Key);
-                if (isNew) kv.Value.Insert(0, "V\t" + FormatVersion + "\r\n");
-                File.AppendAllText(kv.Key, kv.Value.ToString(), new UTF8Encoding(false));
+                string text = pending[f].ToString();
+                if (text.Length > 0)
+                {
+                    if (!File.Exists(f)) text = "V\t" + FormatVersion + "\r\n" + text;
+                    File.AppendAllText(f, text, new UTF8Encoding(false));
+                }
+                pending.Remove(f);
             }
-            pending.Clear();
         }
 
         /// <summary>비정상 종료로 닫히지 않은 구간을 마지막 저장 시점에서 닫는다.</summary>
         public int Recover(DateTime now)
         {
             var files = new List<string>();
-            string prev = FileFor(dir, now.AddMonths(-1)), cur = FileFor(dir, now);
-            if (File.Exists(prev)) files.Add(prev);
-            if (File.Exists(cur)) files.Add(cur);
+            // 한 달 넘게 PC를 꺼 둔 뒤 켜도 마지막 월 파일의 열린 구간을 복구할 수 있게 최근 파일 2개를 본다.
+            if (Directory.Exists(dir))
+            {
+                var all = Directory.GetFiles(dir, "sessions-*.tsv");
+                Array.Sort(all, StringComparer.OrdinalIgnoreCase);
+                for (int i = Math.Max(0, all.Length - 2); i < all.Length; i++) files.Add(all[i]);
+            }
             if (files.Count == 0) return 0;
 
             var openKeys = new Dictionary<string, Segment>(StringComparer.Ordinal);
@@ -165,7 +173,7 @@ namespace UsageTracker
             var d = new Dictionary<string, AppInfo>(StringComparer.OrdinalIgnoreCase);
             string f = Path.Combine(dir, "appinfo.tsv");
             if (!File.Exists(f)) return d;
-            foreach (var line in File.ReadAllLines(f, Encoding.UTF8))
+            foreach (var line in AtomicFile.ReadAllLinesShared(f))
             {
                 var p = line.Split('\t');
                 if (p.Length < 4 || p[0] == "V") continue;
@@ -182,7 +190,7 @@ namespace UsageTracker
             var sb = new StringBuilder();
             if (!File.Exists(f)) sb.Append("V\t").Append(FormatVersion).Append("\r\n");
             foreach (var a in apps)
-                sb.Append(a.Id).Append('\t').Append(Clean(a.Name)).Append('\t').Append(Clean(a.Path))
+                sb.Append(Clean(a.Id)).Append('\t').Append(Clean(a.Name)).Append('\t').Append(Clean(a.Path))
                   .Append('\t').Append(Fmt(a.FirstSeen)).Append("\r\n");
             File.AppendAllText(f, sb.ToString(), new UTF8Encoding(false));
             apps.Clear();

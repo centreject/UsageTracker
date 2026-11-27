@@ -79,6 +79,13 @@ namespace UsageTracker
                 { "T28 창 있는 앱은 CLI로 또 세지 않음", T28_CliExcludeWindowed },
                 { "T29 CLI 마지막 실행 시각", T29_LastRun },
                 { "T30 통계 창 상태 저장·불러오기", T30_UiPrefs },
+                { "T31 자리 비움 예외 종료 후 시청 시간 보존", T31_IdleAfterAudio },
+                { "T32 자정·월말 분할 시 0초 구간 미기록", T32_MidnightNoZeroLine },
+                { "T33 실행기 특수문자·옵션·TSV 정제", T33_HostEdgeAndClean },
+                { "T34 마지막 사용 정확도·장기 미실행 복구", T34_LastUsedAndLongGapRecover },
+                { "T35 UWP 지연 인식·보조 모니터 최대화 판정", T35_UwpRetryAndFullscreen },
+                { "T36 IPC 서명 검증·절전 중복 방지", T36_IpcAndSuspend },
+                { "T37 저장 중간 실패 후 재시도 시 중복 없음", T37_FlushPartialFailure },
             };
             foreach (var kv in tests)
             {
@@ -282,13 +289,15 @@ namespace UsageTracker
             env.Full = true;
             var t = NewTracker(env, dir);
             TicksTo(env, t, 100); env.At(100);
-            TicksTo(env, t, 450);
+            TicksTo(env, t, 450);                 // 420초 주기까지 전체 화면 유지
             True("전체 화면이면 자리 비움 아님", !t.IsIdle);
             env.Full = false;
-            TicksTo(env, t, 500);                 // 480초 주기에서 판정
+            TicksTo(env, t, 500);                 // 480초 주기에서 판정 → 전체 화면 시청 시간(420초)은 보존
             True("전체 화면이 끝나면 자리 비움", t.IsIdle);
             t.Shutdown();
-            Near("활성은 마지막 입력 시점까지", 100, Get(Sum(dir, env.Base).Active, "a.exe"));
+            var s = Sum(dir, env.Base);
+            Near("활성은 마지막 전체 화면 확인 시점까지 보존", 420, Get(s.Active, "a.exe"));
+            Near("PC 사용도 함께 보존", 420, s.PcUsed);
         }
 
         static void T06_Pause()
@@ -656,6 +665,190 @@ namespace UsageTracker
             Near("바탕화면 활성은 기록", 60, Get(s.Active, AppResolver.DesktopId));
             True("탐색기 실행 시간 없음", Get(s.Running, "explorer.exe") == 0);
             True("바탕화면 실행 시간 없음", Get(s.Running, AppResolver.DesktopId) == 0);
+        }
+
+        static void T31_IdleAfterAudio()
+        {
+            var env = NewEnv(); string dir = NewDir();
+            env.Audio.Add("a.exe");
+            var t = NewTracker(env, dir);
+            TicksTo(env, t, 100); env.At(100);    // 재생 클릭 후 손 뗌
+            TicksTo(env, t, 700);                 // 660초 주기까지 소리 재생으로 활성 유지
+            True("소리 재생 중 활성 유지", !t.IsIdle);
+            env.Audio.Clear();                    // 영상 종료
+            TicksTo(env, t, 750);                 // 720초 주기에서 자리 비움 진입
+            True("소리 끝난 뒤 자리 비움", t.IsIdle);
+            t.Shutdown();
+            var s = Sum(dir, env.Base);
+            Near("영상 시청 시간(660초) 보존", 660, Get(s.Active, "a.exe"));
+            Near("PC 사용 시간 보존", 660, s.PcUsed);
+        }
+
+        static void T32_MidnightNoZeroLine()
+        {
+            var env = new FakeEnv { Base = new DateTime(2026, 3, 31, 23, 59, 0) };
+            string dir = NewDir();
+            env.Visible.Add("a.exe");
+            var t = NewTracker(env, dir);
+            env.At(90); t.Tick();                 // 4월 1일 00:00:30 → 자정·월말 분할
+            env.At(120); t.Shutdown();
+            int zeroLines = 0;
+            foreach (var f in Directory.GetFiles(dir, "sessions-*.tsv"))
+                foreach (var line in File.ReadAllLines(f, Encoding.UTF8))
+                {
+                    var p = line.Split('\t');
+                    if (p.Length == 4 && "ARPU".IndexOf(p[0][0]) >= 0 && p[1] == p[2]) zeroLines++;
+                }
+            True("자정·월말 분할에서 0초 줄 없음 (실제 " + zeroLines + "개)", zeroLines == 0);
+            Near("3월 31일 활성 60초", 60, Get(Sum(dir, env.Base).Active, "a.exe"));
+            Near("4월 1일 활성 60초", 60, Get(Sum(dir, env.Base.AddDays(1)).Active, "a.exe"));
+        }
+
+        static void T33_HostEdgeAndClean()
+        {
+            Func<string, string, string> name = (exe, cmd) => { var r = HostApps.Target(exe, cmd); return r == null ? null : r.Item1; };
+            True("node -e 특수문자 예외 없음", name("node.exe", "node -e \"console.log('a|b<c>')\"") == null);
+            True("node --eval 무시", name("node.exe", "node --eval \"1+1\"") == null);
+            True("node -p 무시", name("node.exe", "node -p \"process.version\"") == null);
+            True("node -r·--env-file 뒤 스크립트 인식", name("node.exe", "node -r dotenv/config --env-file .env server.js") == "server.js");
+            True("python 금지 문자 예외 없음", name("python.exe", "python \"bad|script.py\"") == null);
+            string cleaned = name("java.exe", "java \"com.app\tbad\nname\"");
+            True("제어문자 제거", cleaned != null && cleaned.IndexOf('\t') < 0 && cleaned.IndexOf('\n') < 0);
+
+            string dir = NewDir();
+            var w = new SessionWriter(dir);
+            var start = new DateTime(2026, 3, 10, 10, 0, 0);
+            w.AddClosed(new Segment { Kind = 'A', AppId = "bad\tid\n.exe", Start = start }, start.AddSeconds(10));
+            w.Flush(start.AddSeconds(10), new Segment[0]);
+            bool allFourCols = true;
+            foreach (var line in File.ReadAllLines(SessionWriter.FileFor(dir, start), Encoding.UTF8))
+            {
+                var p = line.Split('\t');
+                if (p[0] == "A" && p.Length != 4) allFourCols = false;
+            }
+            True("AppId 탭·줄바꿈이 TSV 열을 깨지 않음", allFourCols);
+        }
+
+        static void T34_LastUsedAndLongGapRecover()
+        {
+            // 1) 기록 모드가 꺼진 상태의 LastUsed는 now가 아니라 마지막 저장 시점이어야 한다
+            var env = NewEnv(); string dir = NewDir();
+            var t = NewTracker(env, dir);
+            env.At(30); t.Flush();
+            var now = env.Base.AddSeconds(120);
+            var alive = UsageReader.LastUsed(dir, new[] { "a.exe" }, now, 'A', true);
+            var dead = UsageReader.LastUsed(dir, new[] { "a.exe" }, now, 'A', false);
+            True("살아 있으면 now", alive == now);
+            True("꺼져 있으면 마지막 저장 시점(30초)", dead != null && Math.Abs((dead.Value - env.Base.AddSeconds(30)).TotalSeconds) <= 1);
+
+            // 2) 같은 초에 시작한 묶음 CLI 앱 중 하나가 닫혀도 나머지가 열려 있으면 실행 중으로 판정
+            string dir2 = NewDir();
+            var t0 = new DateTime(2026, 3, 10, 0, 0, 0);
+            File.WriteAllText(SessionWriter.FileFor(dir2, t0),
+                "V\t1\r\n" +
+                "O\tR\t2026-03-10 00:00:00\tcli:x.exe\r\n" +
+                "O\tR\t2026-03-10 00:00:00\tcli:y.exe\r\n" +
+                "R\t2026-03-10 00:00:00\t2026-03-10 00:05:00\tcli:x.exe\r\n" +
+                "F\t2026-03-10 00:06:00\r\n", new UTF8Encoding(false));
+            var now2 = t0.AddMinutes(10);
+            True("같은 초 시작 그룹에서 열린 멤버 유지", UsageReader.LastUsed(dir2, new[] { "cli:x.exe", "cli:y.exe" }, now2, 'R', true) == now2);
+
+            // 3) 2달 전 비정상 종료 후 복구 및 과거 달 조회 시 now까지 유령 시간 확장 방지
+            string dir3 = NewDir();
+            var jan = new DateTime(2026, 1, 15, 10, 0, 0);
+            var env3 = new FakeEnv { Base = jan };
+            var t3 = NewTracker(env3, dir3);
+            env3.At(60); t3.Flush();   // 1월 15일 10:01 저장 후 비정상 종료
+            var mar = new DateTime(2026, 3, 20, 10, 0, 0);
+            var janSegs = UsageReader.Read(dir3, new DateTime(2026, 1, 1), new DateTime(2026, 2, 1), mar, true);
+            var janSum = UsageReader.Summarize(janSegs, id => id, new DateTime(2026, 1, 1), new DateTime(2026, 2, 1));
+            Near("미복구 과거 달 조회가 현재까지 번지지 않음", 60, Get(janSum.Active, "a.exe"));
+            int rec = new SessionWriter(dir3).Recover(mar);
+            True("2달 전 미복구 O 구간 복구됨", rec > 0);
+        }
+
+        static void T35_UwpRetryAndFullscreen()
+        {
+            // UWP 창 초기 fgApp=null 상태에서 다음 주기에 지연 인식
+            var env = NewEnv(); env.Fg = null;
+            string dir = NewDir();
+            var t = NewTracker(env, dir);
+            True("초기엔 활성 앱 없음", !t.HasActiveApp);
+            env.At(10); env.Fg = "calc.exe";
+            env.At(60); t.Tick();
+            True("주기에 안쪽 UWP 앱 인식", t.HasActiveApp);
+            env.At(120); t.Shutdown();
+            Near("지연 인식 뒤 활성 60초 기록", 60, Get(Sum(dir, env.Base).Active, "calc.exe"));
+
+            // 전체 화면 판정: 보조 모니터(작업 표시줄 없음)의 일반 최대화 창은 제외
+            var mon = new Native.RECT { Left = 0, Top = 0, Right = 1920, Bottom = 1080 };
+            var maxRect = new Native.RECT { Left = -8, Top = -8, Right = 1928, Bottom = 1088 };
+            var fullRect = new Native.RECT { Left = 0, Top = 0, Right = 1920, Bottom = 1080 };
+            var partRect = new Native.RECT { Left = 0, Top = 0, Right = 1280, Bottom = 720 };
+            True("일반 최대화 창(제목+테두리)은 전체 화면 아님", !RealEnv.IsFullscreenRect(maxRect, mon, true, Native.WS_CAPTION | Native.WS_THICKFRAME));
+            True("테두리 없는 전체 화면(F11 등)은 전체 화면", RealEnv.IsFullscreenRect(fullRect, mon, false, 0));
+            True("테두리 없는 최대화 창은 전체 화면", RealEnv.IsFullscreenRect(fullRect, mon, true, 0));
+            True("부분 창은 전체 화면 아님", !RealEnv.IsFullscreenRect(partRect, mon, false, 0));
+        }
+
+        static void T36_IpcAndSuspend()
+        {
+            int op; string[] ids;
+            True("lParam=0 거부", !DataMaintenance.Parse(IntPtr.Zero, out op, out ids));
+
+            // 기존 단순 정수(1, 2)는 우연한 브로드캐스트 방지를 위해 거부해야 한다
+            IntPtr cdsPtr = System.Runtime.InteropServices.Marshal.AllocHGlobal(System.Runtime.InteropServices.Marshal.SizeOf(typeof(DataMaintenance.COPYDATASTRUCT)));
+            IntPtr strPtr = System.Runtime.InteropServices.Marshal.StringToHGlobalUni("a.exe\nb.exe");
+            try
+            {
+                var oldCds = new DataMaintenance.COPYDATASTRUCT { dwData = (IntPtr)2, cbData = 0, lpData = IntPtr.Zero };
+                System.Runtime.InteropServices.Marshal.StructureToPtr(oldCds, cdsPtr, false);
+                True("매직 없는 dwData=2 거부", !DataMaintenance.Parse(cdsPtr, out op, out ids));
+
+                var delCds = new DataMaintenance.COPYDATASTRUCT { dwData = (IntPtr)DataMaintenance.OpDelete, cbData = ("a.exe\nb.exe".Length + 1) * 2, lpData = strPtr };
+                System.Runtime.InteropServices.Marshal.StructureToPtr(delCds, cdsPtr, false);
+                True("유효한 OpDelete 파싱", DataMaintenance.Parse(cdsPtr, out op, out ids) && op == DataMaintenance.OpDelete && ids.Length == 2 && ids[0] == "a.exe" && ids[1] == "b.exe");
+
+                var rstCds = new DataMaintenance.COPYDATASTRUCT { dwData = (IntPtr)DataMaintenance.OpReset, cbData = 0, lpData = IntPtr.Zero };
+                System.Runtime.InteropServices.Marshal.StructureToPtr(rstCds, cdsPtr, false);
+                True("유효한 OpReset 파싱", DataMaintenance.Parse(cdsPtr, out op, out ids) && op == DataMaintenance.OpReset && ids.Length == 0);
+            }
+            finally
+            {
+                System.Runtime.InteropServices.Marshal.FreeHGlobal(strPtr);
+                System.Runtime.InteropServices.Marshal.FreeHGlobal(cdsPtr);
+            }
+
+            // SetSuspended 중복 호출 시 상태가 실제로 바뀐 첫 호출만 true
+            var env = NewEnv(); string dir = NewDir();
+            var t = NewTracker(env, dir);
+            True("첫 절전 전환만 true", t.SetSuspended(true) && !t.SetSuspended(true));
+            True("첫 복귀 전환만 true", t.SetSuspended(false) && !t.SetSuspended(false));
+            t.Shutdown();
+        }
+
+        static void T37_FlushPartialFailure()
+        {
+            // 3월·4월 파일에 쓸 게 있는데 4월 파일 자리가 폴더라 쓰기가 실패하는 상황
+            string dir = NewDir();
+            var w = new SessionWriter(dir);
+            var mar = new DateTime(2026, 3, 31, 23, 0, 0);
+            var apr = new DateTime(2026, 4, 1, 0, 10, 0);
+            w.AddClosed(new Segment { Kind = 'A', AppId = "a.exe", Start = mar }, mar.AddMinutes(10));
+            w.AddClosed(new Segment { Kind = 'A', AppId = "b.exe", Start = apr }, apr.AddMinutes(10));
+            string aprFile = SessionWriter.FileFor(dir, apr);
+            Directory.CreateDirectory(aprFile);
+            bool threw = false;
+            try { w.Flush(apr.AddMinutes(10), new Segment[0]); } catch { threw = true; }
+            True("4월 파일 쓰기 실패", threw);
+
+            Directory.Delete(aprFile);
+            w.Flush(apr.AddMinutes(15), new Segment[0]);   // 재시도
+            Near("3월 활성 600초 (중복 없음)", 600, Get(Sum(dir, mar).Active, "a.exe"));
+            Near("4월 활성 600초", 600, Get(Sum(dir, apr).Active, "b.exe"));
+            int headers = 0;
+            foreach (var line in File.ReadAllLines(aprFile, Encoding.UTF8)) if (line.StartsWith("V\t")) headers++;
+            True("4월 파일 V 줄 1개 (실제 " + headers + "개)", headers == 1);
         }
     }
 }

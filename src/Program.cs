@@ -14,7 +14,7 @@ namespace UsageTracker
     /// </summary>
     static class Program
     {
-        static readonly IntPtr TimerTickId = (IntPtr)1, TimerIdleId = (IntPtr)2, TimerFlushId = (IntPtr)3, TimerPauseId = (IntPtr)4, TimerHealthId = (IntPtr)5;
+        static readonly IntPtr TimerTickId = (IntPtr)1, TimerIdleId = (IntPtr)2, TimerFlushId = (IntPtr)3, TimerPauseId = (IntPtr)4, TimerHealthId = (IntPtr)5, TimerUwpRetryId = (IntPtr)6;
         const uint IdlePollMs = 2000;
 
         static IntPtr hwnd;
@@ -65,10 +65,14 @@ namespace UsageTracker
                         : Path.Combine(Path.GetTempPath(), "UsageTracker-selftest.txt");
                     return SelfTest.Run(report);
                 }
-                if (a.StartsWith("--data=")) { dataDir = Path.GetFullPath(a.Substring(7)); manageAutoStart = false; }
-                else if (a.StartsWith("--tick=")) tickMs = (uint)Math.Max(1, int.Parse(a.Substring(7))) * 1000;
-                else if (a.StartsWith("--flush=")) flushMs = (uint)Math.Max(1, int.Parse(a.Substring(8))) * 1000;
-                else if (a.StartsWith("--idle=")) idleSecOverride = Math.Max(0, int.Parse(a.Substring(7)));   // 0 = 자리 비움 판정 끔 (시험용)
+                if (a.StartsWith("--data="))
+                {
+                    string d = a.Substring(7).Trim();
+                    if (d.Length > 0) { dataDir = Path.GetFullPath(d); manageAutoStart = false; }
+                }
+                else if (a.StartsWith("--tick=")) { int v; if (int.TryParse(a.Substring(7), out v)) tickMs = (uint)Math.Max(1, v) * 1000; }
+                else if (a.StartsWith("--flush=")) { int v; if (int.TryParse(a.Substring(8), out v)) flushMs = (uint)Math.Max(1, v) * 1000; }
+                else if (a.StartsWith("--idle=")) { int v; if (int.TryParse(a.Substring(7), out v)) idleSecOverride = Math.Max(0, v); }   // 0 = 자리 비움 판정 끔 (시험용)
             }
             Program.dataDir = dataDir;
 
@@ -182,7 +186,14 @@ namespace UsageTracker
 
         static void OnWinEvent(IntPtr h, uint evt, IntPtr window, int idObject, int idChild, uint thread, uint time)
         {
-            Safe("foreground", () => { tracker.OnForeground(window); UpdateTip(); });
+            Safe("foreground", () =>
+            {
+                tracker.OnForeground(window);
+                // UWP 창(ApplicationFrameWindow)이 막 뜰 때 안쪽 앱이 아직 없으면 0.5초 뒤 한 번 더 확인한다
+                if (!tracker.HasActiveApp && window != IntPtr.Zero && Native.ClassName(window) == "ApplicationFrameWindow")
+                    Native.SetTimer(hwnd, TimerUwpRetryId, 500, IntPtr.Zero);
+                UpdateTip();
+            });
         }
 
         static string lastTip;
@@ -225,8 +236,8 @@ namespace UsageTracker
 
                     case Native.WM_POWERBROADCAST:
                         int pbt = wParam.ToInt32();
-                        if (pbt == Native.PBT_APMSUSPEND) { tracker.SetSuspended(true); Health.Log("suspend"); }
-                        else if (pbt == Native.PBT_APMRESUMEAUTOMATIC || pbt == Native.PBT_APMRESUMESUSPEND) { tracker.SetSuspended(false); Health.Log("resume"); }
+                        if (pbt == Native.PBT_APMSUSPEND) { if (tracker.SetSuspended(true)) Health.Log("suspend"); }
+                        else if (pbt == Native.PBT_APMRESUMEAUTOMATIC || pbt == Native.PBT_APMRESUMESUSPEND) { if (tracker.SetSuspended(false)) Health.Log("resume"); }
                         UpdateIdleTimer();
                         UpdateTip();
                         return (IntPtr)1;
@@ -297,6 +308,11 @@ namespace UsageTracker
                 Native.KillTimer(hwnd, TimerPauseId);
                 if (tracker.IsPaused && tracker.PauseUntil != DateTime.MaxValue) tracker.SetPause(0);
             }
+            else if (id == TimerUwpRetryId)
+            {
+                Native.KillTimer(hwnd, TimerUwpRetryId);
+                if (!tracker.HasActiveApp) tracker.OnForeground(Native.GetForegroundWindow());
+            }
         }
 
         static void UpdateIdleTimer()
@@ -310,7 +326,8 @@ namespace UsageTracker
 
         static void OnMenu()
         {
-            int cmd = tray.ShowMenu(tracker.StatusText(), tracker.IsPaused, settings.AutoStart, manageAutoStart, ErrorLog.Count);
+            bool autoOn = settings.AutoStart && !(manageAutoStart && AutoStart.DisabledInWindows());
+            int cmd = tray.ShowMenu(tracker.StatusText(), tracker.IsPaused, autoOn, manageAutoStart, ErrorLog.Count);
             Execute(cmd);
         }
 
@@ -328,7 +345,8 @@ namespace UsageTracker
                     break;
                 case Tray.CmdAutoStart:
                     if (!manageAutoStart) break;
-                    settings.AutoStart = !settings.AutoStart;
+                    bool currentlyOn = settings.AutoStart && !AutoStart.DisabledInWindows();
+                    settings.AutoStart = !currentlyOn;
                     settings.Save();
                     AutoStart.Apply(settings.AutoStart, exePath, true);   // 사용자가 직접 고름
                     break;

@@ -70,7 +70,9 @@ namespace UsageTracker
                 }
             }
 
-            DateTime openEnd = recorderAlive ? now : lastFlush;
+            // 과거 달 조회에서 복구되지 않은 오래된 O 줄이 현재(now)까지 이어지지 않게, 이번 달까지 읽었을 때만 now를 쓴다
+            bool reachesNow = lastMonth == nowMonth;
+            DateTime openEnd = (recorderAlive && reachesNow) ? now : lastFlush;
             foreach (var o in open.Values)
             {
                 if (openEnd <= o.Start) continue;
@@ -228,9 +230,9 @@ namespace UsageTracker
 
         /// <summary>
         /// 앱(들)이 마지막으로 활성(kind='A') 또는 실행(kind='R', CLI용)이었던 시각.
-        /// 지금 그 상태면 now. 최근 24개월만 찾는다.
+        /// 지금 그 상태이고 기록 모드가 살아 있으면 now. 최근 24개월만 찾는다.
         /// </summary>
-        public static DateTime? LastUsed(string dir, ICollection<string> ids, DateTime now, char kind = 'A')
+        public static DateTime? LastUsed(string dir, ICollection<string> ids, DateTime now, char kind = 'A', bool recorderAlive = true)
         {
             var set = new HashSet<string>(ids, StringComparer.OrdinalIgnoreCase);
             var month = new DateTime(now.Year, now.Month, 1);
@@ -240,15 +242,21 @@ namespace UsageTracker
                 var pf = Parse(SessionWriter.FileFor(dir, month));
                 if (pf == null) continue;
                 DateTime best = DateTime.MinValue;
-                var open = new HashSet<long>();
+                // 그룹 내 여러 앱이 같은 초(예: 자정 분할)에 시작해도 서로 지워지지 않게 앱 ID까지 키에 포함한다
+                var open = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
                 foreach (var r in pf.Records)
                 {
                     if (r.Kind != kind || !set.Contains(r.App)) continue;
-                    if (r.Open) { open.Add(r.Start.Ticks); continue; }
+                    string k = r.App + "|" + r.Start.Ticks;
+                    if (r.Open) { open.Add(k); continue; }
                     if (r.End > best) best = r.End;
-                    open.Remove(r.Start.Ticks);
+                    open.Remove(k);
                 }
-                if (open.Count > 0 && i == 0) return now;
+                if (open.Count > 0 && i == 0)
+                {
+                    if (recorderAlive) return now;
+                    if (pf.LastFlush > best) best = pf.LastFlush;
+                }
                 if (best > DateTime.MinValue) return best;
             }
             return null;

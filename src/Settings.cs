@@ -18,7 +18,7 @@ namespace UsageTracker
             path = Path.Combine(dataDir, "settings.ini");
             IsNew = !File.Exists(path);
             if (IsNew) return;
-            foreach (var line in File.ReadAllLines(path, Encoding.UTF8))
+            foreach (var line in AtomicFile.ReadAllLinesShared(path))
             {
                 int eq = line.IndexOf('=');
                 if (eq > 0) values[line.Substring(0, eq).Trim()] = line.Substring(eq + 1).Trim();
@@ -63,6 +63,19 @@ namespace UsageTracker
             File.WriteAllText(tmp, text, new UTF8Encoding(false));
             if (File.Exists(path)) File.Replace(tmp, path, null);
             else File.Move(tmp, path);
+        }
+
+        /// <summary>다른 프로세스가 덧붙여 쓰는 중에도 충돌 없이 읽는다.</summary>
+        public static List<string> ReadAllLinesShared(string path)
+        {
+            var lines = new List<string>();
+            using (var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete))
+            using (var sr = new StreamReader(fs, Encoding.UTF8))
+            {
+                string line;
+                while ((line = sr.ReadLine()) != null) lines.Add(line);
+            }
+            return lines;
         }
     }
 }

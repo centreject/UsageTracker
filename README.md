@@ -32,11 +32,13 @@ Windows 데스크탑용 프로그램 사용 시간 기록 앱. 백그라운드�
 
 ## 빌드
 
-Windows에 내장된 .NET Framework 4.8 C# 컴파일러만 있으면 된다.
+64비트(x64) Windows에 내장된 .NET Framework 4.8 C# 컴파일러만 있으면 된다.
 
 ```powershell
 .\build.ps1
 ```
+
+PowerShell 실행 정책 때문에 `.ps1`이 차단되면 `powershell -ExecutionPolicy Bypass -File .\build.ps1`처럼 실행한다.
 
 결과물은 `bin\UsageTracker.exe`와 `bin\UsageTracker.exe.config`다. 실행하면 트레이에 상주하며 `%LOCALAPPDATA%\UsageTracker\`에 기록한다.
 

@@ -36,9 +36,9 @@ namespace UsageTracker
                     string a = args[i];
                     if (a == "-jar" && i + 1 < args.Count) return File(args[i + 1]);
                     if (a == "-cp" || a == "-classpath" || a == "--class-path" || a == "-p" || a == "--module-path") { i++; continue; }
-                    if (a == "-m" || a == "--module") return i + 1 < args.Count ? Tuple.Create(args[i + 1].Split('/')[0], (string)null) : null;
+                    if (a == "-m" || a == "--module") return i + 1 < args.Count ? Named(args[i + 1].Split('/')[0]) : null;
                     if (a.StartsWith("-")) continue;
-                    return Tuple.Create(a, (string)null);   // 메인 클래스
+                    return Named(a);   // 메인 클래스
                 }
                 return null;
             }
@@ -47,7 +47,7 @@ namespace UsageTracker
                 for (int i = 1; i < args.Count; i++)
                 {
                     string a = args[i];
-                    if (a == "-m" && i + 1 < args.Count) return Tuple.Create(args[i + 1], (string)null);
+                    if (a == "-m" && i + 1 < args.Count) return Named(args[i + 1]);
                     if (a == "-c") return null;                       // 한 줄 코드는 구분하지 않음
                     if (a == "-W" || a == "-X") { i++; continue; }
                     if (a.StartsWith("-")) continue;
@@ -61,13 +61,20 @@ namespace UsageTracker
                 return null;
             }
             // node, electron, wscript, cscript: 옵션이 아닌 첫 인자
+            bool isNode = exe == "node.exe";
             for (int i = 1; i < args.Count; i++)
             {
                 string a = args[i];
+                if (isNode)
+                {
+                    if (a == "-e" || a == "--eval" || a == "-p" || a == "--print") return null;   // 한 줄 코드는 구분하지 않음
+                    if (a == "-r" || a == "--require" || a == "--import" || a == "--loader" || a == "--env-file" || a == "--env-file-if-exists" || a == "-C" || a == "--conditions")
+                    { i++; continue; }
+                }
                 if (a.StartsWith("-") || a.StartsWith("//")) continue;
                 var f = File(a);
                 // npm으로 설치한 CLI는 ...\node_modules\@scope\pkg\cli.js 처럼 파일명이 흔하므로 패키지 이름을 쓴다
-                string pkg = f == null ? null : NodePackage(a);
+                string pkg = f == null ? null : CleanToken(NodePackage(a));
                 return pkg != null ? Tuple.Create(pkg, f.Item2) : f;
             }
             return null;
@@ -85,12 +92,35 @@ namespace UsageTracker
             return parts[0];
         }
 
+        static readonly char[] InvalidPathChars = Path.GetInvalidPathChars();
+
+        static string CleanToken(string s)
+        {
+            if (string.IsNullOrWhiteSpace(s)) return null;
+            var sb = new System.Text.StringBuilder(s.Length);
+            foreach (char c in s.Trim())
+                if (c >= ' ') sb.Append(c);
+            string r = sb.ToString().Trim();
+            return r.Length > 0 ? r : null;
+        }
+
+        static Tuple<string, string> Named(string token)
+        {
+            string clean = CleanToken(token);
+            return clean != null ? Tuple.Create(clean, (string)null) : null;
+        }
+
         static Tuple<string, string> File(string path)
         {
-            string trimmed = path.TrimEnd('\\', '/');
-            string name = Path.GetFileName(trimmed);
-            if (string.IsNullOrEmpty(name)) return null;
-            return Tuple.Create(name, Path.IsPathRooted(trimmed) ? trimmed : null);
+            if (string.IsNullOrWhiteSpace(path) || path.IndexOfAny(InvalidPathChars) >= 0) return null;
+            try
+            {
+                string trimmed = path.TrimEnd('\\', '/');
+                string name = CleanToken(Path.GetFileName(trimmed));
+                if (name == null) return null;
+                return Tuple.Create(name, Path.IsPathRooted(trimmed) ? trimmed : null);
+            }
+            catch (ArgumentException) { return null; }
         }
 
         /// <summary>Windows 명령줄 규칙(따옴표·역슬래시)대로 인자를 나눈다.</summary>
