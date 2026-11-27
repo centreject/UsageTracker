@@ -26,12 +26,7 @@ namespace UsageTracker.Ui
             {
                 string f = PathOf(dataDir);
                 if (!File.Exists(f)) return p;
-                var d = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-                foreach (var line in AtomicFile.ReadAllLinesShared(f))
-                {
-                    int eq = line.IndexOf('=');
-                    if (eq > 0) d[line.Substring(0, eq).Trim()] = line.Substring(eq + 1).Trim();
-                }
+                var d = IniFile.ReadDictionary(f);
                 p.X = Int(d, "x", int.MinValue); p.Y = Int(d, "y", int.MinValue);
                 p.W = Int(d, "w", 0); p.H = Int(d, "h", 0);
                 p.Split = Int(d, "split", 0);

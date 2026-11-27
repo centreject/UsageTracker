@@ -71,7 +71,7 @@ namespace UsageTracker
         public double TodayUsedSeconds()
         {
             DateTime today = env.Now().Date;
-            if (usedDay != today) { usedDay = today; usedTodayClosed = 0; }
+            RollDay(today);
             double open = 0;
             if (used != null)
             {
@@ -79,6 +79,19 @@ namespace UsageTracker
                 open = Math.Max(0, (env.Now() - from).TotalSeconds);
             }
             return usedTodayClosed + open;
+        }
+
+        /// <summary>날짜가 바뀌었으면 오늘 사용 시간 합계를 0부터 다시 센다.</summary>
+        void RollDay(DateTime today)
+        {
+            if (usedDay != today) { usedDay = today; usedTodayClosed = 0; }
+        }
+
+        /// <summary>소리·전체 화면 예외와 다른 모니터 시청 상태를 지운다 (잠금·절전·자리 비움·전체 닫기 때).</summary>
+        void ClearException()
+        {
+            lastExceptionTs = long.MinValue;
+            watchApp = null;
         }
 
         /// <summary>시작할 때 이미 기록된 오늘 사용 시간을 넣어 둔다.</summary>
@@ -136,7 +149,7 @@ namespace UsageTracker
             if (locked == value) return;
             locked = value;
             idle = false;
-            lastExceptionTs = long.MinValue; watchApp = null;
+            ClearException();
             if (!value) RefreshForeground();
             Reconcile();
             if (!value) RefreshRunning();
@@ -148,7 +161,7 @@ namespace UsageTracker
             if (suspended == value) return false;
             suspended = value;
             idle = false;
-            lastExceptionTs = long.MinValue; watchApp = null;
+            ClearException();
             if (value)
             {
                 Reconcile();
@@ -264,7 +277,7 @@ namespace UsageTracker
                 return true;
             }
             idle = false;
-            lastExceptionTs = long.MinValue; watchApp = null;
+            ClearException();
             RefreshForeground();
             long ts = env.Ts() - Clock.MsToTs(idleMs);
             ReconcileAt(ts, env.Now().AddMilliseconds(-idleMs));
@@ -277,7 +290,7 @@ namespace UsageTracker
             long at = ts - Clock.MsToTs(idleMs);   // 마지막 입력 시점까지만 집계
             // 영상 시청(소리·전체 화면 예외) 뒤 재생이 끝나 자리 비움이 됐을 때, 시청 시간까지 되감아 지우지 않는다
             if (lastExceptionTs > at) at = Math.Min(lastExceptionTs, ts);
-            lastExceptionTs = long.MinValue; watchApp = null;
+            ClearException();
             if (active != null) { Close(active, Math.Max(at, active.StartTs)); active = null; }
             if (used != null) { Close(used, Math.Max(at, used.StartTs)); used = null; }
         }
@@ -318,7 +331,7 @@ namespace UsageTracker
         {
             long ts = Clock.TsAt(s, midnight);
             writer.AddClosed(s, midnight);
-            return new Segment { Kind = s.Kind, AppId = s.AppId, Start = midnight, StartTs = ts };
+            return Segment.Open(s.Kind, s.AppId, midnight, ts);
         }
 
         // ---------- 구간 열고 닫기 ----------
@@ -341,7 +354,7 @@ namespace UsageTracker
             }
             if (active == null && want != null)
             {
-                active = new Segment { Kind = 'A', AppId = want, Start = now, StartTs = ts };
+                active = Segment.Open('A', want, now, ts);
                 lastActiveApp = want;
                 if (RunningAllowed && AppResolver.CountsAsRunning(want)) EnsureRunning(want, ts, now);
             }
@@ -358,13 +371,13 @@ namespace UsageTracker
 
         void Toggle(ref Segment s, bool allowed, char kind, long ts, DateTime now)
         {
-            if (allowed && s == null) s = new Segment { Kind = kind, AppId = "-", Start = now, StartTs = ts };
+            if (allowed && s == null) s = Segment.Open(kind, "-", now, ts);
             else if (!allowed && s != null) { Close(s, ts); s = null; }
         }
 
         void EnsureRunning(string id, long ts, DateTime now)
         {
-            if (!running.ContainsKey(id)) running[id] = new Segment { Kind = 'R', AppId = id, Start = now, StartTs = ts };
+            if (!running.ContainsKey(id)) running[id] = Segment.Open('R', id, now, ts);
         }
 
         void CloseRunning(long ts)
@@ -375,7 +388,7 @@ namespace UsageTracker
 
         void CloseAll(long ts)
         {
-            lastExceptionTs = long.MinValue; watchApp = null;
+            ClearException();
             if (active != null) { Close(active, ts); active = null; }
             if (used != null) { Close(used, ts); used = null; }
             if (on != null) { Close(on, ts); on = null; }
@@ -389,7 +402,7 @@ namespace UsageTracker
             if (s.Kind == 'U')
             {
                 DateTime today = env.Now().Date;
-                if (usedDay != today) { usedDay = today; usedTodayClosed = 0; }
+                RollDay(today);
                 var from = s.Start < today ? today : s.Start;
                 if (end > from) usedTodayClosed += (end - from).TotalSeconds;
             }
@@ -415,7 +428,7 @@ namespace UsageTracker
             Flush();
             DataMaintenance.ResetAll(writer.Dir);
             env.ResetApps();
-            lastExceptionTs = long.MinValue; watchApp = null;
+            ClearException();
             long ts = env.Ts(); DateTime now = env.Now();
             usedDay = now.Date; usedTodayClosed = 0;
             if (on != null) on = Restart(on, ts, now);
@@ -429,7 +442,7 @@ namespace UsageTracker
 
         static Segment Restart(Segment s, long ts, DateTime now)
         {
-            return new Segment { Kind = s.Kind, AppId = s.AppId, Start = now, StartTs = ts };
+            return Segment.Open(s.Kind, s.AppId, now, ts);
         }
 
         void CloseRunningSilently() { running.Clear(); }

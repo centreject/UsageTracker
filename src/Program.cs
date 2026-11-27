@@ -43,15 +43,7 @@ namespace UsageTracker
                 if (a == "--ui") ui = true;
                 else if (a.StartsWith("--probe="))
                 {
-                    // 진단: 소리 세션 상태와 지금 소리를 내는 pid, 실행 중 프로세스의 앱 ID(실행기 구분 포함)
-                    var lines = new System.Collections.Generic.List<string>(Audio.Describe());
-                    lines.Add("audible pids: " + string.Join(",", Audio.ActivePids()));
-                    var resolver = new AppResolver(new System.Collections.Generic.Dictionary<string, AppInfo>(StringComparer.OrdinalIgnoreCase));
-                    var cache = new System.Collections.Generic.Dictionary<uint, string>();
-                    var env = new RealEnv(resolver);
-                    foreach (var id in env.VisibleApps()) lines.Add("visible app: " + id + " = " + resolver.NameOf(id));
-                    lines.Add("foreground app: " + resolver.ForegroundApp(Native.GetForegroundWindow()));
-                    File.WriteAllLines(a.Substring(8), lines.ToArray(), new System.Text.UTF8Encoding(true));
+                    Probe(a.Substring(8));
                     return 0;
                 }
                 else if (a.StartsWith("--bench="))
@@ -162,6 +154,18 @@ namespace UsageTracker
 
         static string dataDir;
 
+        /// <summary>진단(--probe=파일): 소리 세션 상태와 지금 소리를 내는 pid, 보이는 앱의 ID(실행기 구분 포함), 맨 앞 앱.</summary>
+        static void Probe(string path)
+        {
+            var lines = new System.Collections.Generic.List<string>(Audio.Describe());
+            lines.Add("audible pids: " + string.Join(",", Audio.ActivePids()));
+            var resolver = new AppResolver(new System.Collections.Generic.Dictionary<string, AppInfo>(StringComparer.OrdinalIgnoreCase));
+            var env = new RealEnv(resolver);
+            foreach (var id in env.VisibleApps()) lines.Add("visible app: " + id + " = " + resolver.NameOf(id));
+            lines.Add("foreground app: " + resolver.ForegroundApp(Native.GetForegroundWindow()));
+            File.WriteAllLines(path, lines.ToArray(), new System.Text.UTF8Encoding(true));
+        }
+
         internal static string Fnv(string s)
         {
             uint h = 2166136261;
@@ -191,11 +195,11 @@ namespace UsageTracker
                 cbSize = (uint)Marshal.SizeOf(typeof(Native.WNDCLASSEX)),
                 lpfnWndProc = Marshal.GetFunctionPointerForDelegate(wndProc),
                 hInstance = Native.GetModuleHandle(null),
-                lpszClassName = "UsageTracker.Recorder"
+                lpszClassName = RecorderLink.ClassName
             };
             Native.RegisterClassEx(ref wc);
             // 보이지 않는 일반 창 (TaskbarCreated 방송을 받으려면 메시지 전용 창이면 안 된다)
-            hwnd = Native.CreateWindowEx(0, wc.lpszClassName, DataMaintenance.RecorderTitle(dataDir), 0, 0, 0, 0, 0,
+            hwnd = Native.CreateWindowEx(0, wc.lpszClassName, RecorderLink.Title(dataDir), 0, 0, 0, 0, 0,
                 IntPtr.Zero, IntPtr.Zero, wc.hInstance, IntPtr.Zero);
         }
 
@@ -266,19 +270,19 @@ namespace UsageTracker
                     case Native.WM_QUERYENDSESSION:
                         return (IntPtr)1;
 
-                    case 0x0010: // WM_CLOSE: 외부에서 정상 종료를 요청할 때 (설치·업데이트 스크립트, 시험)
+                    case RecorderLink.WM_CLOSE: // 외부에서 정상 종료를 요청할 때 (설치·업데이트 스크립트, 시험)
                         Native.PostQuitMessage(0);
                         return IntPtr.Zero;
 
-                    case 0x0111: // WM_COMMAND: 메뉴와 같은 명령 (CmdErrors처럼 창을 여는 명령은 제외)
+                    case RecorderLink.WM_COMMAND: // 메뉴와 같은 명령 (CmdErrors처럼 창을 여는 명령은 제외)
                         int c = wParam.ToInt32() & 0xFFFF;
                         if (c != Tray.CmdErrors) { Execute(c); UpdateIdleTimer(); UpdateTip(); }
                         return IntPtr.Zero;
 
-                    case 0x004A: // WM_COPYDATA: 화면 모드의 기록 삭제·초기화 요청
+                    case RecorderLink.WM_COPYDATA: // 화면 모드의 기록 삭제·초기화 요청
                         int op; string[] ids;
-                        if (!DataMaintenance.Parse(lParam, out op, out ids)) return IntPtr.Zero;
-                        if (op == DataMaintenance.OpDelete) tracker.DeleteApps(ids);
+                        if (!RecorderLink.ParseData(lParam, out op, out ids)) return IntPtr.Zero;
+                        if (op == RecorderLink.OpDelete) tracker.DeleteApps(ids);
                         else tracker.ResetAll();
                         UpdateTip();
                         return (IntPtr)1;

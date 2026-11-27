@@ -53,7 +53,7 @@ namespace UsageTracker
             var openStarts = new HashSet<long>();
             for (; month <= lastMonth; month = month.AddMonths(1))
             {
-                var pf = Parse(SessionWriter.FileFor(dir, month));
+                var pf = Parse(SessionFormat.FileFor(dir, month));
                 if (pf == null) continue;
                 if (pf.LastFlush > lastFlush) lastFlush = pf.LastFlush;
                 foreach (var r in pf.Records)
@@ -130,16 +130,15 @@ namespace UsageTracker
             if (cache.TryGetValue(path, out pf) && pf.Length == fi.Length && pf.WriteTime == fi.LastWriteTimeUtc) return pf;
 
             pf = new ParsedFile { Length = fi.Length, WriteTime = fi.LastWriteTimeUtc };
-            foreach (var line in ReadLinesShared(path))
+            foreach (var line in AtomicFile.ReadLinesShared(path))
             {
                 var p = line.Split('\t');
                 DateTime s, e;
-                if (p.Length == 4 && p[0].Length == 1 && "ARPU".IndexOf(p[0][0]) >= 0
-                    && SessionWriter.TryParse(p[1], out s) && SessionWriter.TryParse(p[2], out e))
+                if (SessionFormat.IsClosed(p) && SessionFormat.TryParseTime(p[1], out s) && SessionFormat.TryParseTime(p[2], out e))
                     pf.Records.Add(new Rec { Kind = p[0][0], Start = s, End = e, App = Intern(p[3]) });
-                else if (p.Length == 4 && p[0] == "O" && p[1].Length == 1 && SessionWriter.TryParse(p[2], out s))
+                else if (SessionFormat.IsOpen(p) && SessionFormat.TryParseTime(p[2], out s))
                     pf.Records.Add(new Rec { Kind = p[1][0], Open = true, Start = s, App = Intern(p[3]) });
-                else if (p.Length == 2 && p[0] == "F" && SessionWriter.TryParse(p[1], out s) && s > pf.LastFlush)
+                else if (SessionFormat.IsFlush(p) && SessionFormat.TryParseTime(p[1], out s) && s > pf.LastFlush)
                     pf.LastFlush = s;
                 // 그 밖의 줄(버전, 쓰다 만 줄)은 무시
             }
@@ -153,17 +152,6 @@ namespace UsageTracker
             if (appIds.TryGetValue(s, out v)) return v;
             appIds[s] = s;
             return s;
-        }
-
-        /// <summary>기록 모드가 덧붙여 쓰는 중에도 읽을 수 있게 공유 모드로 연다.</summary>
-        static IEnumerable<string> ReadLinesShared(string path)
-        {
-            using (var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete))
-            using (var sr = new StreamReader(fs, Encoding.UTF8))
-            {
-                string line;
-                while ((line = sr.ReadLine()) != null) yield return line;
-            }
         }
 
         /// <summary>
@@ -239,7 +227,7 @@ namespace UsageTracker
             // 해석 캐시를 쓰므로, 화면에 보이는 기간의 파일은 다시 읽지 않는다
             for (int i = 0; i < 24; i++, month = month.AddMonths(-1))
             {
-                var pf = Parse(SessionWriter.FileFor(dir, month));
+                var pf = Parse(SessionFormat.FileFor(dir, month));
                 if (pf == null) continue;
                 DateTime best = DateTime.MinValue;
                 // 그룹 내 여러 앱이 같은 초(예: 자정 분할)에 시작해도 서로 지워지지 않게 앱 ID까지 키에 포함한다

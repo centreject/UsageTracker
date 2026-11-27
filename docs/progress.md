@@ -55,5 +55,7 @@
 - git·gh는 PATH 갱신 필요: `$env:Path = [Environment]::GetEnvironmentVariable('Path','Machine') + ';' + [Environment]::GetEnvironmentVariable('Path','User')`
 - 커밋 메시지 끝: `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`
 - 화면 확인: `.\tools\snap.ps1 -Title '사용 시간 기록' -Out <png>` (DPI 인식 캡처), 통계 창 시험 옵션 `--view=0..3 --select=<앱ID> --theme=dark|light --favonly --search=`
+- 리팩토링 검증(2026-11-27에 쓴 방법): 바꾸기 전 exe를 따로 복사해 두고, 같은 시험 데이터 사본으로 `--ui --view=N` 창을 PrintWindow로 캡처해 해시 비교(같은 시각대에 찍어야 함) + 시험 폴더 기록 모드에 WM_COMMAND·WM_COPYDATA·WM_CLOSE를 보내 옛·새 결과 비교
+- 코드 지도: 기록 파일 형식 `SessionFormat`, 기록 모드 연락 `RecorderLink`, key=value 파일 `IniFile`(AtomicFile.cs), 자체 시험은 `SelfTest.cs`(실행·도우미) + `SelfTest.Tracker/Data/Apps.cs`
 - 시험 스크립트: `tools\test-run.ps1`, `tools\test-events.ps1`(일시정지·절전·잠금·시각 변경 메시지), `tools\selftest.ps1`, 진단 `--probe=<파일>`
 - 로그인 사용자 GitHub 계정: centreject (gh 로그인은 외부 Chrome으로, 터미널에서 Enter 먼저 누르고 브라우저에서 승인)

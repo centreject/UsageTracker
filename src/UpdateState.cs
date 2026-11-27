@@ -26,11 +26,9 @@ namespace UsageTracker
             try
             {
                 if (!File.Exists(s.path)) return s;
-                foreach (var line in AtomicFile.ReadAllLinesShared(s.path))
+                foreach (var kv in IniFile.Read(s.path))
                 {
-                    int eq = line.IndexOf('=');
-                    if (eq <= 0) continue;
-                    string k = line.Substring(0, eq).Trim(), v = line.Substring(eq + 1).Trim();
+                    string k = kv.Key, v = kv.Value;
                     DateTime t;
                     if (k == "lastCheck" && DateTime.TryParseExact(v, "yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture, DateTimeStyles.None, out t)) s.LastCheck = t;
                     else if (k == "skip") s.SkipVersion = v;

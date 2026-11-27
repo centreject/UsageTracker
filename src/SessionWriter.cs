@@ -1,7 +1,6 @@
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
-using System.Globalization;
 using System.IO;
 using System.Text;
 
@@ -15,6 +14,12 @@ namespace UsageTracker
         public DateTime Start;   // 벽시계 시각
         public long StartTs;     // Stopwatch 타임스탬프 (시계 변경에 영향받지 않는 기준)
         public bool Logged;      // 'O'(열림) 줄을 이미 파일에 썼는지
+
+        /// <summary>지금 막 열린 구간 (아직 파일에 쓰지 않음).</summary>
+        public static Segment Open(char kind, string appId, DateTime start, long startTs)
+        {
+            return new Segment { Kind = kind, AppId = appId, Start = start, StartTs = startTs };
+        }
     }
 
     static class Clock
@@ -38,18 +43,11 @@ namespace UsageTracker
     }
 
     /// <summary>
-    /// 사용 구간을 월별 파일(sessions-YYYY-MM.tsv)에 덧붙여 쓴다. 파일 형식(탭 구분):
-    ///   V  1                               형식 버전 (파일 첫 줄)
-    ///   A|R|P|U  시작  끝  앱ID             끝난 구간 (자정에서 나눠 씀)
-    ///   O  종류  시작  앱ID                 진행 중인 구간이 열렸다는 표시 (비정상 종료 복구용)
-    ///   F  시각                             저장 시점 표시
+    /// 사용 구간을 월별 파일(sessions-YYYY-MM.tsv)에 덧붙여 쓴다. 파일 형식은 SessionFormat.
     /// 비정상 종료 후 시작하면, 짝이 없는 O 구간을 마지막 F 시각에서 닫는다.
     /// </summary>
     sealed class SessionWriter
     {
-        public const string TimeFormat = "yyyy-MM-dd HH:mm:ss";
-        const int FormatVersion = 1;
-
         readonly string dir;
         readonly SortedDictionary<string, StringBuilder> pending = new SortedDictionary<string, StringBuilder>(StringComparer.Ordinal);
 
@@ -60,16 +58,11 @@ namespace UsageTracker
 
         public string Dir { get { return dir; } }
 
-        public static string FileFor(string dataDir, DateTime t)
-        {
-            return Path.Combine(dataDir, "sessions-" + t.ToString("yyyy-MM", CultureInfo.InvariantCulture) + ".tsv");
-        }
-
-        static string Fmt(DateTime t) { return t.ToString(TimeFormat, CultureInfo.InvariantCulture); }
+        static string Fmt(DateTime t) { return SessionFormat.FormatTime(t); }
 
         StringBuilder Buf(DateTime t)
         {
-            string f = FileFor(dir, t);
+            string f = SessionFormat.FileFor(dir, t);
             StringBuilder sb;
             if (!pending.TryGetValue(f, out sb)) { sb = new StringBuilder(); pending[f] = sb; }
             return sb;
@@ -105,11 +98,11 @@ namespace UsageTracker
             foreach (var s in open)
             {
                 if (s.Logged) continue;
-                Buf(s.Start).Append("O\t").Append(s.Kind).Append('\t').Append(Fmt(s.Start))
+                Buf(s.Start).Append(SessionFormat.OpenTag).Append('\t').Append(s.Kind).Append('\t').Append(Fmt(s.Start))
                     .Append('\t').Append(Clean(s.AppId ?? "-")).Append("\r\n");
                 s.Logged = true;
             }
-            Buf(now).Append("F\t").Append(Fmt(now)).Append("\r\n");
+            Buf(now).Append(SessionFormat.FlushTag).Append('\t').Append(Fmt(now)).Append("\r\n");
 
             // 파일마다 쓴 즉시 버퍼에서 뺀다. 중간 파일에서 실패해도 이미 쓴 파일을 다음 저장 때 다시 쓰지 않게
             foreach (var f in new List<string>(pending.Keys))
@@ -117,7 +110,7 @@ namespace UsageTracker
                 string text = pending[f].ToString();
                 if (text.Length > 0)
                 {
-                    if (!File.Exists(f)) text = "V\t" + FormatVersion + "\r\n" + text;
+                    if (!File.Exists(f)) text = SessionFormat.VersionTag + "\t" + SessionFormat.Version + "\r\n" + text;
                     File.AppendAllText(f, text, new UTF8Encoding(false));
                 }
                 pending.Remove(f);
@@ -131,7 +124,7 @@ namespace UsageTracker
             // 한 달 넘게 PC를 꺼 둔 뒤 켜도 마지막 월 파일의 열린 구간을 복구할 수 있게 최근 파일 2개를 본다.
             if (Directory.Exists(dir))
             {
-                var all = Directory.GetFiles(dir, "sessions-*.tsv");
+                var all = Directory.GetFiles(dir, SessionFormat.FilePattern);
                 Array.Sort(all, StringComparer.OrdinalIgnoreCase);
                 for (int i = Math.Max(0, all.Length - 2); i < all.Length; i++) files.Add(all[i]);
             }
@@ -145,11 +138,11 @@ namespace UsageTracker
                 {
                     var p = line.Split('\t');
                     DateTime t;
-                    if (p.Length == 4 && p[0] == "O" && p[1].Length == 1 && TryParse(p[2], out t))
+                    if (SessionFormat.IsOpen(p) && SessionFormat.TryParseTime(p[2], out t))
                         openKeys[p[1] + "|" + p[2] + "|" + p[3]] = new Segment { Kind = p[1][0], Start = t, AppId = p[3], Logged = true };
-                    else if (p.Length == 4 && p[0].Length == 1 && "ARPU".IndexOf(p[0][0]) >= 0)
+                    else if (SessionFormat.IsClosed(p))
                         openKeys.Remove(p[0] + "|" + p[1] + "|" + p[3]);
-                    else if (p.Length == 2 && p[0] == "F" && TryParse(p[1], out t) && t > lastFlush)
+                    else if (SessionFormat.IsFlush(p) && SessionFormat.TryParseTime(p[1], out t) && t > lastFlush)
                         lastFlush = t;
                 }
             }
@@ -161,17 +154,12 @@ namespace UsageTracker
             return openKeys.Count;
         }
 
-        public static bool TryParse(string s, out DateTime t)
-        {
-            return DateTime.TryParseExact(s, TimeFormat, CultureInfo.InvariantCulture, DateTimeStyles.None, out t);
-        }
-
         // ---------- 앱 정보 (appinfo.tsv: 기록 모드만 쓴다) ----------
 
         /// <summary>오늘 이미 기록된(닫힌) PC 사용(U) 시간(초). 기록 모드 시작 때 트레이 툴팁용으로 한 번 읽는다.</summary>
         public static double TodayUsedSeconds(string dir, DateTime now)
         {
-            string f = FileFor(dir, now);
+            string f = SessionFormat.FileFor(dir, now);
             if (!File.Exists(f)) return 0;
             DateTime today = now.Date, tomorrow = today.AddDays(1);
             double sum = 0;
@@ -180,7 +168,7 @@ namespace UsageTracker
                 if (line.Length < 2 || line[0] != 'U' || line[1] != '\t') continue;
                 var p = line.Split('\t');
                 DateTime a, b;
-                if (p.Length < 3 || !TryParse(p[1], out a) || !TryParse(p[2], out b)) continue;
+                if (p.Length < 3 || !SessionFormat.TryParseTime(p[1], out a) || !SessionFormat.TryParseTime(p[2], out b)) continue;
                 if (a < today) a = today;
                 if (b > tomorrow) b = tomorrow;
                 if (b > a) sum += (b - a).TotalSeconds;
@@ -197,7 +185,7 @@ namespace UsageTracker
             {
                 var p = line.Split('\t');
                 if (p.Length < 4 || p[0] == "V") continue;
-                DateTime t; TryParse(p[3], out t);
+                DateTime t; SessionFormat.TryParseTime(p[3], out t);
                 d[p[0]] = new AppInfo { Id = p[0], Name = p[1], Path = p[2], FirstSeen = t };
             }
             return d;
@@ -208,7 +196,7 @@ namespace UsageTracker
             if (apps.Count == 0) return;
             string f = Path.Combine(dir, "appinfo.tsv");
             var sb = new StringBuilder();
-            if (!File.Exists(f)) sb.Append("V\t").Append(FormatVersion).Append("\r\n");
+            if (!File.Exists(f)) sb.Append(SessionFormat.VersionTag).Append('\t').Append(SessionFormat.Version).Append("\r\n");
             foreach (var a in apps)
                 sb.Append(Clean(a.Id)).Append('\t').Append(Clean(a.Name)).Append('\t').Append(Clean(a.Path))
                   .Append('\t').Append(Fmt(a.FirstSeen)).Append("\r\n");
