@@ -182,6 +182,7 @@ namespace UsageTracker
         {
             paused = minutes != 0;
             pauseUntil = minutes > 0 ? env.Now().AddMinutes(minutes) : DateTime.MaxValue;
+            if (paused) ClearException();
             if (!paused) RefreshForeground();
             Reconcile();
             if (!paused) RefreshRunning();
@@ -246,10 +247,11 @@ namespace UsageTracker
                     if (watched != null && excluded.Contains(watched)) watched = null;
                     if (watched != null)
                     {
-                        lastExceptionTs = ts;
-                        // 시청은 마지막 입력 때부터로 본다 (그 뒤로는 맨 앞 앱이 아니라 영상을 보고 있었다)
+                        // 시청은 마지막 입력 때부터로 보되, 그사이 주 모니터의 소리·전체 화면 예외 구간을 되감아 지우지 않는다
                         long at = ts - Clock.MsToTs(idleMs);
+                        if (lastExceptionTs > at) at = Math.Min(lastExceptionTs, ts);
                         if (active != null && at < active.StartTs) at = active.StartTs;
+                        lastExceptionTs = ts;
                         if (watchApp == null) SetWatch(watched, at, now.AddSeconds(-(double)(ts - at) / Stopwatch.Frequency));
                         else SetWatch(watched, ts, now);
                     }

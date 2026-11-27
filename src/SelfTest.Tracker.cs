@@ -434,5 +434,38 @@ namespace UsageTracker
             t2.SeedTodayUsed(env.Now(), SessionWriter.TodayUsedSeconds(dir, env.Now()));
             Near("다시 시작해도 이어짐", 60, t2.TodayUsedSeconds());
         }
+
+        static void T43_WatchAfterExceptionAndPause()
+        {
+            // 주 모니터에서 전체 화면 시청(600초) 뒤 종료, 곧바로 보조 모니터 영상(v.exe)으로 넘어갈 때
+            // 주 모니터 시청 시간이 마지막 입력(100초)까지 되감겨 지워지지 않아야 한다
+            var env = NewEnv(); string dir = NewDir();
+            env.Fg = "a.exe"; env.Full = true;
+            var t = NewTracker(env, dir);
+            TicksTo(env, t, 100); env.At(100);
+            TicksTo(env, t, 600);                 // 600초 주기까지 a.exe 전체 화면
+            env.Full = false;
+            env.Audio.Add("v.exe"); env.Watched = "v.exe";
+            TicksTo(env, t, 720);                 // 660초 주기에서 보조 모니터 시청 전환 → 600초부터 v.exe
+            t.Shutdown();
+            var s = Sum(dir, env.Base);
+            Near("주 모니터 시청(600초) 보존", 600, Get(s.Active, "a.exe"));
+            Near("보조 모니터 시청(600-720초) 기록", 120, Get(s.Active, "v.exe"));
+
+            // 보조 모니터 시청 중 일시정지하면 watchApp이 비워져 재개 시 오래된 watchApp으로 복귀하지 않음
+            var env2 = NewEnv(); string dir2 = NewDir();
+            env2.Fg = "a.exe"; env2.Audio.Add("v.exe"); env2.Watched = "v.exe";
+            var t2 = NewTracker(env2, dir2);
+            env2.At(100);
+            TicksTo(env2, t2, 500);
+            True("보조 모니터 시청 진입", t2.NeedsIdlePoll && !t2.IsIdle);
+            env2.T = 500; t2.SetPause(15);
+            True("일시정지 시 시청 상태 해제", !t2.NeedsIdlePoll);
+            env2.Audio.Clear(); env2.Watched = null;
+            env2.T = 560; t2.SetPause(0);         // 타이머 자동 재개(입력 없음)
+            env2.T = 620; t2.Shutdown();
+            var s2 = Sum(dir2, env2.Base);
+            Near("재개 후에는 맨 앞 앱(a.exe) 기록", 160, Get(s2.Active, "a.exe"));
+        }
     }
 }

@@ -1,13 +1,6 @@
 using System;
-using System.Collections.Generic;
 using System.Diagnostics;
 using System.Drawing;
-using System.IO;
-using System.IO.Compression;
-using System.Net;
-using System.Security.Cryptography;
-using System.Text;
-using System.Web.Script.Serialization;
 using System.Windows.Forms;
 
 namespace UsageTracker.Ui
@@ -38,7 +31,7 @@ namespace UsageTracker.Ui
             if (body.Length > 800) body = body.Substring(0, 800) + " …";
             if (body.Length > 0)
                 root.Controls.Add(new TextBox { Text = body.Replace("\r\n", "\n").Replace("\n", "\r\n"), Multiline = true, ReadOnly = true, ScrollBars = ScrollBars.Vertical, Width = 420, Height = 120, Margin = new Padding(0, 10, 0, 4), BackColor = theme.Dark ? theme.Panel : Color.White, ForeColor = theme.Text });
-            if (!string.IsNullOrEmpty(url))
+            if (Updater.IsSafeReleasePage(url))
             {
                 var link = new LinkLabel { Text = "릴리스 페이지 열기", AutoSize = true, Margin = new Padding(0, 2, 0, 6) };
                 link.LinkClicked += (s, e) => { try { Process.Start(url); } catch { } };

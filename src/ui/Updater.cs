@@ -154,14 +154,16 @@ namespace UsageTracker.Ui
             return list;
         }
 
-        /// <summary>가장 높은 버전. 1.0.0 전에는 사전 릴리스도 대상, 1.0.0부터는 정식 릴리스만.</summary>
+        /// <summary>가장 높은 버전. 1.0.0 전에는 사전 릴리스도 대상, 1.0.0부터는 정식 릴리스만. 같은 버전이면 정식을 우선.</summary>
         static Release Pick(List<Release> list, Version current)
         {
             Release best = null;
             foreach (var r in list)
             {
                 if (r.Prerelease && current.Major >= 1) continue;
-                if (best == null || r.Version > best.Version) best = r;
+                if (best == null || r.Version > best.Version
+                    || (r.Version == best.Version && !r.Prerelease && best.Prerelease))
+                    best = r;
             }
             return best;
         }
@@ -172,49 +174,103 @@ namespace UsageTracker.Ui
             return r == null ? null : r.Version.ToString(3) + (r.ZipUrl != null && r.ShaUrl != null ? "+files" : "");
         }
 
+        /// <summary>릴리스 페이지 URL이 이 저장소의 HTTPS 주소인지 확인한다 (ShellExecute 스킴 악용 방지).</summary>
+        internal static bool IsSafeReleasePage(string url)
+        {
+            Uri u;
+            if (!Uri.TryCreate(url, UriKind.Absolute, out u)) return false;
+            return u.Scheme == Uri.UriSchemeHttps
+                && u.Host.Equals("github.com", StringComparison.OrdinalIgnoreCase)
+                && u.AbsolutePath.StartsWith("/" + Repo + "/", StringComparison.OrdinalIgnoreCase);
+        }
+
+        /// <summary>업데이트 파일 다운로드 URL이 HTTPS GitHub 호스트인지 확인한다.</summary>
+        internal static bool IsSafeDownloadUrl(string url)
+        {
+            Uri u;
+            if (!Uri.TryCreate(url, UriKind.Absolute, out u)) return false;
+            if (u.Scheme != Uri.UriSchemeHttps) return false;
+            return (u.Host.Equals("github.com", StringComparison.OrdinalIgnoreCase)
+                    && u.AbsolutePath.StartsWith("/" + Repo + "/", StringComparison.OrdinalIgnoreCase))
+                || u.Host.EndsWith(".githubusercontent.com", StringComparison.OrdinalIgnoreCase);
+        }
+
+        /// <summary>받은 실행 파일의 ProductVersion이 대상 릴리스 버전과 정확히 일치하는지 확인한다 (0.9.1 vs 0.9.10 구분).</summary>
+        internal static bool IsVersionMatch(string productVersion, Version expected)
+        {
+            Version got = UpdateState.ParseTag(productVersion);
+            return got != null && expected != null && got == expected;
+        }
+
         static string Str(Dictionary<string, object> d, string k) { object v; return d.TryGetValue(k, out v) ? v as string : null; }
         static bool IsTrue(Dictionary<string, object> d, string k) { object v; return d.TryGetValue(k, out v) && v is bool && (bool)v; }
 
         // ---------- 업데이트 ----------
 
+        sealed class TimeoutWebClient : WebClient
+        {
+            readonly int timeoutMs;
+            public TimeoutWebClient(int timeoutMs) { this.timeoutMs = timeoutMs; }
+            protected override WebRequest GetWebRequest(Uri address)
+            {
+                var req = base.GetWebRequest(address);
+                req.Timeout = timeoutMs;
+                var http = req as HttpWebRequest;
+                if (http != null) http.ReadWriteTimeout = timeoutMs;
+                return req;
+            }
+        }
+
         static void Apply(Release rel, string dataDir, bool devMode)
         {
             if (rel.ZipUrl == null || rel.ShaUrl == null)
             {
-                try { Process.Start(rel.HtmlUrl); } catch { }
+                if (IsSafeReleasePage(rel.HtmlUrl))
+                    try { Process.Start(rel.HtmlUrl); } catch { }
                 throw new Exception("이 릴리스에는 자동 업데이트용 파일이 없습니다. 릴리스 페이지에서 직접 받아 주십시오.");
             }
+            if (!IsSafeDownloadUrl(rel.ZipUrl) || !IsSafeDownloadUrl(rel.ShaUrl))
+                throw new Exception("허용되지 않은 업데이트 다운로드 주소입니다.");
+
             string work = Path.Combine(Path.GetTempPath(), "UsageTracker-update-" + rel.Version.ToString(3));
             if (Directory.Exists(work)) Directory.Delete(work, true);
             Directory.CreateDirectory(work);
-            string zip = Path.Combine(work, "update.zip");
-            using (var wc = new WebClient())
+            try
             {
-                ServicePointManager.SecurityProtocol |= SecurityProtocolType.Tls12;
-                wc.Headers[HttpRequestHeader.UserAgent] = UserAgent;
-                wc.DownloadFile(rel.ZipUrl, zip);
-                wc.Headers[HttpRequestHeader.UserAgent] = UserAgent;
-                string sha = wc.DownloadString(rel.ShaUrl);
-                string expected = sha.Trim().Split(new[] { ' ', '\t', '\r', '\n', '*' }, StringSplitOptions.RemoveEmptyEntries)[0];
-                if (!string.Equals(expected, Sha256(zip), StringComparison.OrdinalIgnoreCase))
-                    throw new Exception("받은 파일의 확인 값(SHA-256)이 맞지 않습니다.");
-            }
-
-            string newExe = Path.Combine(work, "UsageTracker.exe"), newCfg = Path.Combine(work, "UsageTracker.exe.config");
-            using (var za = ZipFile.OpenRead(zip))
-                foreach (var e in za.Entries)
+                string zip = Path.Combine(work, "update.zip");
+                using (var wc = new TimeoutWebClient(30000))
                 {
-                    if (string.Equals(e.Name, "UsageTracker.exe", StringComparison.OrdinalIgnoreCase)) e.ExtractToFile(newExe, true);
-                    else if (string.Equals(e.Name, "UsageTracker.exe.config", StringComparison.OrdinalIgnoreCase)) e.ExtractToFile(newCfg, true);
+                    ServicePointManager.SecurityProtocol |= SecurityProtocolType.Tls12;
+                    wc.Headers[HttpRequestHeader.UserAgent] = UserAgent;
+                    wc.DownloadFile(rel.ZipUrl, zip);
+                    wc.Headers[HttpRequestHeader.UserAgent] = UserAgent;
+                    string sha = wc.DownloadString(rel.ShaUrl);
+                    var parts = (sha ?? "").Trim().Split(new[] { ' ', '\t', '\r', '\n', '*' }, StringSplitOptions.RemoveEmptyEntries);
+                    if (parts.Length == 0)
+                        throw new Exception("받은 확인 값(SHA-256) 파일이 비어 있습니다.");
+                    if (!string.Equals(parts[0], Sha256(zip), StringComparison.OrdinalIgnoreCase))
+                        throw new Exception("받은 파일의 확인 값(SHA-256)이 맞지 않습니다.");
                 }
-            if (!File.Exists(newExe)) throw new Exception("받은 파일에 UsageTracker.exe가 없습니다.");
-            string got = FileVersionInfo.GetVersionInfo(newExe).ProductVersion ?? "";
-            if (!got.StartsWith(rel.Version.ToString(3))) throw new Exception("받은 프로그램의 버전(" + got + ")이 릴리스와 다릅니다.");
 
-            string dir = Path.GetDirectoryName(Application.ExecutablePath);
-            string exe = Path.Combine(dir, "UsageTracker.exe");
-            Replace(exe, newExe, newCfg, dataDir, devMode);
-            try { Directory.Delete(work, true); } catch { }
+                string newExe = Path.Combine(work, "UsageTracker.exe"), newCfg = Path.Combine(work, "UsageTracker.exe.config");
+                using (var za = ZipFile.OpenRead(zip))
+                    foreach (var e in za.Entries)
+                    {
+                        if (string.Equals(e.Name, "UsageTracker.exe", StringComparison.OrdinalIgnoreCase)) e.ExtractToFile(newExe, true);
+                        else if (string.Equals(e.Name, "UsageTracker.exe.config", StringComparison.OrdinalIgnoreCase)) e.ExtractToFile(newCfg, true);
+                    }
+                if (!File.Exists(newExe)) throw new Exception("받은 파일에 UsageTracker.exe가 없습니다.");
+                string got = FileVersionInfo.GetVersionInfo(newExe).ProductVersion ?? "";
+                if (!IsVersionMatch(got, rel.Version)) throw new Exception("받은 프로그램의 버전(" + got + ")이 릴리스와 다릅니다.");
+
+                string dir = Path.GetDirectoryName(Application.ExecutablePath);
+                string exe = Path.Combine(dir, "UsageTracker.exe");
+                Replace(exe, newExe, newCfg, dataDir, devMode);
+            }
+            finally
+            {
+                try { if (Directory.Exists(work)) Directory.Delete(work, true); } catch { }
+            }
         }
 
         /// <summary>기록 모드를 저장 후 끝내고, 실행 파일을 바꾼 뒤 다시 실행한다. 중간에 실패하면 원래대로 되돌린다.</summary>

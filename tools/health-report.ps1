@@ -19,7 +19,7 @@ $err = Join-Path $Data 'error.log'
 $errLines = @()
 if (Test-Path $err) { $errLines = @(Get-Content $err -Encoding UTF8) }
 
-function Report($rows, $label) {
+function Report($rows, $label, $nextStart) {
     $awake = 0.0; $cpu = 0.0; $writes = 0.0
     for ($i = 1; $i -lt $rows.Count; $i++) {
         $a = $rows[$i - 1]; $b = $rows[$i]
@@ -36,8 +36,15 @@ function Report($rows, $label) {
     $unexpected = 0
     for ($i = 1; $i -lt $rows.Count; $i++) { if ($rows[$i].Event -eq 'start' -and $rows[$i - 1].Event -notin 'stop', 'logoff') { $unexpected++ } }
     $span = ($rows[-1].Time - $rows[0].Time).TotalHours
-    $from = $rows[0].Time; $to = $rows[-1].Time.AddHours(1)
-    $errs = @($errLines | Where-Object { $_ -match '^(\d{4}-\d\d-\d\d \d\d:\d\d:\d\d) \[(?!recover)' -and [datetime]$Matches[1] -ge $from -and [datetime]$Matches[1] -le $to }).Count
+    $from = $rows[0].Time
+    $to = if ($rows[-1].Event -in 'stop', 'logoff') { $rows[-1].Time } else { $rows[-1].Time.AddHours(1) }
+    $exclusiveEnd = $false
+    if ($nextStart -and $nextStart -le $to) { $to = $nextStart; $exclusiveEnd = $true }
+    $errs = @($errLines | Where-Object {
+        $_ -match '^(\d{4}-\d\d-\d\d \d\d:\d\d:\d\d) \[(?!recover)' -and
+        [datetime]$Matches[1] -ge $from -and
+        $(if ($exclusiveEnd) { [datetime]$Matches[1] -lt $to } else { [datetime]$Matches[1] -le $to })
+    }).Count
 
     "=== $label   {0:MM-dd HH:mm} -> {1:MM-dd HH:mm}" -f $rows[0].Time, $rows[-1].Time
     "Rows: $($rows.Count)  span {0:N1} h  awake (measured) {1:N1} h  starts: {2}  unexpected restarts: {3}" -f $span, $hours, @($rows | Where-Object Event -eq 'start').Count, $unexpected
@@ -53,4 +60,8 @@ function Report($rows, $label) {
     ''
 }
 
-$all | Group-Object Version | ForEach-Object { Report @($_.Group) ("v" + $_.Name) }
+$groups = @($all | Group-Object Version | Sort-Object { $_.Group[0].Time })
+for ($g = 0; $g -lt $groups.Count; $g++) {
+    $nextStart = if ($g + 1 -lt $groups.Count) { $groups[$g + 1].Group[0].Time } else { $null }
+    Report @($groups[$g].Group) ("v" + $groups[$g].Name) $nextStart
+}

@@ -20,7 +20,7 @@ namespace UsageTracker
             int removed = 0;
             foreach (var f in Directory.GetFiles(dir, SessionFormat.FilePattern))
             {
-                var lines = File.ReadAllLines(f, Encoding.UTF8);
+                var lines = AtomicFile.ReadAllLinesShared(f);
                 var sb = new StringBuilder();
                 int before = removed;
                 foreach (var line in lines)

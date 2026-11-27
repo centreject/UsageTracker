@@ -21,6 +21,7 @@ namespace UsageTracker.Ui
         bool autoStartInitially;
         readonly CheckBox updateCheck = new CheckBox { Text = "새 버전 알림 (일주일에 한 번 확인)", AutoSize = true };
         List<string> excluded = new List<string>();
+        bool excludeChanged;
         readonly ListBox excludeList = new ListBox { SelectionMode = SelectionMode.MultiExtended, BorderStyle = BorderStyle.FixedSingle, IntegralHeight = false };
 
         sealed class ExcludeItem
@@ -111,6 +112,7 @@ namespace UsageTracker.Ui
                 {
                     var sel = new List<object>();
                     foreach (var o in excludeList.SelectedItems) sel.Add(o);
+                    if (sel.Count > 0) excludeChanged = true;
                     foreach (var o in sel) excludeList.Items.Remove(o);
                 };
                 root.Controls.Add(include);
@@ -173,6 +175,7 @@ namespace UsageTracker.Ui
                 settings.Exclude = latest.FindAll(id => keep.Contains(id) || !excluded.Contains(id));
             }
             else settings.Exclude = new Settings(dataDir).Exclude;
+            if (excludeChanged) DataChanged = true;
             settings.Save();
             // 사용자가 이 창에서 직접 켰으면 Windows 쪽 "사용 안 함"도 다시 켠다
             if (!devMode && autoStart.Checked && !autoStartInitially)

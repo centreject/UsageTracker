@@ -92,6 +92,9 @@ namespace UsageTracker
                 { "T39 보조 모니터 시청", T39_WatchOtherMonitor },
                 { "T40 오늘 사용 시간 (트레이 툴팁)", T40_TodayUsed },
                 { "T41 업데이트 알림 판단", T41_UpdateDecision },
+                { "T42 업데이트 URL·버전 검증 및 정식 우선", T42_UpdateSafety },
+                { "T43 예외 뒤 보조 모니터 시청·일시정지 해제", T43_WatchAfterExceptionAndPause },
+                { "T44 게임패드 순환 만료·툴팁 시간 형식", T44_GamepadAndTooltip },
             };
             foreach (var kv in tests)
             {

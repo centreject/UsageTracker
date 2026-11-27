@@ -109,7 +109,7 @@ namespace UsageTracker.Ui
     }
 
     /// <summary>앱 아이콘. exe에서 꺼내고, 못 꺼내면 기본 아이콘.</summary>
-    sealed class IconCache
+    sealed class IconCache : IDisposable
     {
         readonly Dictionary<string, Image> cache = new Dictionary<string, Image>(StringComparer.OrdinalIgnoreCase);
         readonly int size;
@@ -119,6 +119,14 @@ namespace UsageTracker.Ui
         {
             this.size = size;
             fallback = Scale(SystemIcons.Application.ToBitmap());
+        }
+
+        public void Dispose()
+        {
+            foreach (var img in cache.Values)
+                if (img != null && img != fallback) img.Dispose();
+            cache.Clear();
+            if (fallback != null) fallback.Dispose();
         }
 
         public Image Get(string key, string path)

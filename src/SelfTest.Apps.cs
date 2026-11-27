@@ -175,5 +175,43 @@ namespace UsageTracker
             True("다음 확인은 일주일 뒤", st2.NextCheck == new DateTime(2026, 12, 4, 10, 0, 0));
             True("건너뛴 버전 저장", st2.SkipVersion == "0.9.0");
         }
+
+        static void T42_UpdateSafety()
+        {
+            True("릴리스 페이지 HTTPS 허용", Ui.Updater.IsSafeReleasePage("https://github.com/centreject/UsageTracker/releases/tag/v1.0.0"));
+            True("릴리스 페이지 HTTP 거부", !Ui.Updater.IsSafeReleasePage("http://github.com/centreject/UsageTracker/releases/tag/v1.0.0"));
+            True("릴리스 페이지 file 스킴 거부", !Ui.Updater.IsSafeReleasePage("file:///C:/Windows/notepad.exe"));
+            True("릴리스 페이지 타 저장소 거부", !Ui.Updater.IsSafeReleasePage("https://github.com/other/repo/releases"));
+
+            True("다운로드 github.com 허용", Ui.Updater.IsSafeDownloadUrl("https://github.com/centreject/UsageTracker/releases/download/v1.0.0/UsageTracker-v1.0.0.zip"));
+            True("다운로드 githubusercontent 허용", Ui.Updater.IsSafeDownloadUrl("https://objects.githubusercontent.com/github-production-release-asset/x.zip"));
+            True("다운로드 외부 호스트 거부", !Ui.Updater.IsSafeDownloadUrl("https://evil.example.com/UsageTracker.zip"));
+            True("다운로드 HTTP 거부", !Ui.Updater.IsSafeDownloadUrl("http://objects.githubusercontent.com/x.zip"));
+
+            // 같은 버전 번호의 사전 릴리스(1.0.0-rc1)보다 정식 릴리스(1.0.0)가 우선
+            string tieJson = "[" +
+                "{\"tag_name\":\"v1.0.0-rc1\",\"draft\":false,\"prerelease\":true,\"assets\":[]}," +
+                "{\"tag_name\":\"v1.0.0\",\"draft\":false,\"prerelease\":false,\"assets\":[" +
+                    "{\"name\":\"UsageTracker-v1.0.0.zip\",\"browser_download_url\":\"https://github.com/centreject/UsageTracker/releases/download/v1.0.0/a.zip\"}," +
+                    "{\"name\":\"UsageTracker-v1.0.0.zip.sha256\",\"browser_download_url\":\"https://github.com/centreject/UsageTracker/releases/download/v1.0.0/a.zip.sha256\"}]}]";
+            True("동률 버전에서 정식 릴리스 우선", Ui.Updater.PickVersionForTest(tieJson, "0.9.4") == "1.0.0+files");
+
+            // ProductVersion 접두사 오탐 방지 (0.9.1 vs 0.9.10)
+            True("정확한 버전 일치", Ui.Updater.IsVersionMatch("0.9.1", new Version("0.9.1")));
+            True("0.9.10은 0.9.1과 다름", !Ui.Updater.IsVersionMatch("0.9.10", new Version("0.9.1")));
+            True("빈 버전 거부", !Ui.Updater.IsVersionMatch("", new Version("0.9.1")));
+        }
+
+        static void T44_GamepadAndTooltip()
+        {
+            bool expired;
+            True("정상 경과 유지", Gamepad.ClampElapsed(60000, out expired) == 60000 && !expired);
+            True("24시간 이상 경과 시 만료 초기화", Gamepad.ClampElapsed(24U * 3600U * 1000U, out expired) == uint.MaxValue && expired);
+
+            True("1분 미만은 빈 문자열", Program.FormatTodayUsed(30) == "");
+            True("5분 표시", Program.FormatTodayUsed(300) == "5분");
+            True("정각 시간은 0분 생략", Program.FormatTodayUsed(3600) == "1시간");
+            True("시간+분 표시", Program.FormatTodayUsed(3660) == "1시간 1분");
+        }
     }
 }
