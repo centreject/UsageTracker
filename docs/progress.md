@@ -22,6 +22,13 @@
   - 측정 끝날 때까지 실제 기록 모드를 건드리지 말 것 (재설치·종료 금지). 시험은 반드시 `--data=<시험 폴더>`로
 - 자체 시험: `.\tools\selftest.ps1` → 30개 시험·108개 확인 모두 통과. CI(GitHub Actions)도 빌드+자체 시험 통과
 
+## ⚠ 2026-11-27 발견: Claude 앱 안에서 실행한 프로세스는 가상화된다
+
+- Claude 데스크톱 앱(MSIX 패키지 Claude_pzs8sxrjxfjjc)의 셸에서 띄운 프로세스는 샌드박스를 꺼도 `%LOCALAPPDATA%`·`%APPDATA%` 쓰기가 `%LOCALAPPDATA%\Packages\Claude_pzs8sxrjxfjjc\LocalCache\...`로, HKCU 쓰기가 `...\SystemAppData\Helium\User.dat`로 가고, Claude 앱이 꺼지면 함께 종료된다 (job 객체)
+- 그래서 Claude가 install.ps1로 설치·실행한 기록 프로그램은 자동 시작 등록이 Windows에 안 보였고(작업 관리자 시작 앱에 없음, 로그인 때 실행 안 됨), 2026-11-26 16:32 Claude 앱 종료 때 같이 꺼졌다 → **24시간 측정 무효, v0.8.3 자동 시작 수정도 검증 안 됨**
+- 11-25 이후 기록 데이터는 `...\Packages\Claude_pzs8sxrjxfjjc\LocalCache\Local\UsageTracker\`에 있다 → 사용자가 Claude 밖에서 실제 폴더로 옮김
+- **규칙: 실제 기록 프로그램 설치·실행은 사용자가 Claude 밖 PowerShell/탐색기에서 한다.** Claude는 `--data=<저장소 폴더>` 시험만 한다 (저장소 폴더는 가상화되지 않음)
+
 ## 남은 일 (순서대로)
 
 1. ~~수동 테스트 중 화면 조작 항목~~ → 2026-11-26 10:20–10:31 진행 완료 (결과는 manual-tests.md). 남은 건 트레이 오른쪽 클릭 메뉴(M4·U1·L5 일부)뿐 — 탐색기가 "클릭만" 권한이라 Claude가 못 함
