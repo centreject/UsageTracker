@@ -40,6 +40,7 @@ namespace UsageTracker.Ui
         readonly ContextMenuStrip menu = new ContextMenuStrip();
         ToolStripMenuItem miRename, miHide, miFavorite, miMerge, miUnmerge, miExclude, miDelete;
         AppCatalog catalog;
+        HashSet<string> excludedIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         IconCache icons;
         readonly ImageList images = new ImageList { ColorDepth = ColorDepth.Depth32Bit };
         Period period = Period.Day;
@@ -53,6 +54,7 @@ namespace UsageTracker.Ui
         bool uninstalled;
 
         // 컨트롤
+        TableLayoutPanel rootLayout;
         readonly RadioButton[] tabs = new RadioButton[4];
         readonly Button prevBtn = new Themer.FlatButton(), nextBtn = new Themer.FlatButton(), todayBtn = new Themer.FlatButton();
         readonly Label periodLabel = new Label();
@@ -69,7 +71,7 @@ namespace UsageTracker.Ui
         readonly LinkLabel errorLink = new LinkLabel();
         DateTime todaySeen = DateTime.Today;
         readonly Timer refreshTimer = new Timer { Interval = 60000 };
-        readonly Font titleFont, boldFont;
+        Font titleFont, boldFont;
 
         /// <summary>처음 보여 줄 기간(0=일 1=주 2=월 3=년)과 선택할 앱. 화면 확인용 (--view=, --select=).</summary>
         public int InitialView;
@@ -122,7 +124,14 @@ namespace UsageTracker.Ui
                 BeginInvoke((Action)(() => { theme = Theme.FromSystem(); Themer.Apply(this, theme); Themer.TitleBar(this, theme); RefreshData(); }));
             };
             Microsoft.Win32.SystemEvents.UserPreferenceChanged += onPref;
-            FormClosed += (s, e) => Microsoft.Win32.SystemEvents.UserPreferenceChanged -= onPref;
+            FormClosed += (s, e) =>
+            {
+                Microsoft.Win32.SystemEvents.UserPreferenceChanged -= onPref;
+                refreshTimer.Dispose();
+                if (icons != null) icons.Dispose();
+                if (titleFont != null) titleFont.Dispose();
+                if (boldFont != null) boldFont.Dispose();
+            };
             // 지난번 창 상태 (위치·크기·탭·정렬·필터). 화면 밖이면 무시
             prefs = UiPrefs.Load(dataDir);
             if (prefs.HasBounds)
@@ -176,18 +185,30 @@ namespace UsageTracker.Ui
         /// <summary>이 창이 있는 모니터의 DPI (모니터별 배율 인식).</summary>
         int ScreenDpi() { return DeviceDpi; }
 
-        /// <summary>배율이 다른 모니터로 옮겼을 때: 글꼴·컨트롤은 WinForms가 맞추고, 직접 정한 픽셀 값(목록 열 너비·아이콘)은 여기서 맞춘다.</summary>
+        int ScalePx(int px) { return (int)Math.Round(px * ScreenDpi() / 96.0); }
+
+        /// <summary>배율이 다른 모니터로 옮겼을 때: 글꼴·컨트롤은 WinForms가 맞추고, 직접 정한 픽셀 값(글꼴·목록 열·그래프 높이·아이콘)은 여기서 맞춘다.</summary>
         void OnDpiRescale(int oldDpi, int newDpi)
         {
             if (oldDpi <= 0 || newDpi <= 0 || oldDpi == newDpi) return;
             double r = (double)newDpi / oldDpi;
+            var oldTitle = titleFont; var oldBold = boldFont;
+            titleFont = new Font(Font.FontFamily, Font.Size * 1.5f, FontStyle.Bold);
+            boldFont = new Font(Font, FontStyle.Bold);
+            periodLabel.Font = boldFont;
+            if (rootLayout != null && rootLayout.RowStyles.Count > 3)
+                rootLayout.RowStyles[3].Height = (float)Math.Round(200 * newDpi / 96.0);
             for (int i = 1; i < list.Columns.Count; i++) list.Columns[i].Width = (int)Math.Round(list.Columns[i].Width * r);
             int iconSize = (int)Math.Round(16 * newDpi / 96.0);
+            var oldIcons = icons;
             icons = new IconCache(iconSize);
             images.Images.Clear();
             images.ImageSize = new Size(iconSize, iconSize);
             periodWidth.Clear();   // 기간 글자 칸 너비는 글꼴 크기에 따라 다시 잰다
             RefreshData();
+            if (oldIcons != null) oldIcons.Dispose();
+            if (oldTitle != null) oldTitle.Dispose();
+            if (oldBold != null) oldBold.Dispose();
         }
 
     }

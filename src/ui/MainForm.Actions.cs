@@ -37,6 +37,11 @@ namespace UsageTracker.Ui
                 miFavorite.Enabled = !hiddenRow;
                 miFavorite.Text = picked.All(k => catalog.IsFavorite(k)) ? "즐겨찾기 해제" : "즐겨찾기에 추가";
                 miUnmerge.Visible = one && AppCatalog.IsGroup(picked[0]);
+                var targetIds = new List<string>();
+                foreach (var k in keys) targetIds.AddRange(AppCatalog.IsGroup(k) ? catalog.Members(k) : new List<string> { k });
+                bool allExcluded = targetIds.Count > 0 && targetIds.All(id => excludedIds.Contains(id));
+                miExclude.Enabled = !hiddenRow && !allExcluded;
+                miExclude.Text = allExcluded ? "이미 기록 제외됨" : "앞으로 기록하지 않기...";
                 miDelete.Text = hiddenRow && one ? "숨긴 앱 " + keys.Count + "개의 기록 모두 삭제..."
                               : one ? "이 앱의 기록 삭제..." : "선택한 " + keys.Count + "개 앱의 기록 삭제...";
             };

@@ -134,7 +134,7 @@ namespace UsageTracker
             DateTime lastFlush = DateTime.MinValue;
             foreach (var f in files)
             {
-                foreach (var line in File.ReadAllLines(f, Encoding.UTF8))
+                foreach (var line in AtomicFile.ReadAllLinesShared(f))
                 {
                     var p = line.Split('\t');
                     DateTime t;

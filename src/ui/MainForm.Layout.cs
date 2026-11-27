@@ -17,11 +17,12 @@ namespace UsageTracker.Ui
         void BuildLayout()
         {
             var root = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 5, Padding = new Padding(12, 8, 12, 8), BackColor = theme.Back };
+            rootLayout = root;
             root.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));   // 창 폭을 넘지 않게
             root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
             root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
             root.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
-            root.RowStyles.Add(new RowStyle(SizeType.Absolute, 200));
+            root.RowStyles.Add(new RowStyle(SizeType.Absolute, ScalePx(200)));
             root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
             Controls.Add(root);
 

@@ -20,6 +20,8 @@ namespace UsageTracker
         static int lastFullScan, lastInputTick;
         static bool scanned, disabled, hadInput;
 
+        const uint MaxAgeMs = 24U * 3600U * 1000U;   // 24시간 이상 입력이 없으면 초기화 (49.7일 TickCount 순환 방지)
+
         /// <summary>마지막 게임패드 입력 이후 경과(ms). 입력을 본 적이 없으면 uint.MaxValue.</summary>
         public static uint MsSinceInput()
         {
@@ -47,7 +49,17 @@ namespace UsageTracker
                 return uint.MaxValue;
             }
             if (!hadInput) return uint.MaxValue;
-            return unchecked((uint)(now - lastInputTick));   // TickCount 순환에도 안전
+            bool expired;
+            uint elapsed = ClampElapsed(unchecked((uint)(now - lastInputTick)), out expired);
+            if (expired) hadInput = false;
+            return elapsed;
+        }
+
+        internal static uint ClampElapsed(uint elapsedMs, out bool expired)
+        {
+            if (elapsedMs >= MaxAgeMs) { expired = true; return uint.MaxValue; }
+            expired = false;
+            return elapsedMs;
         }
     }
 }

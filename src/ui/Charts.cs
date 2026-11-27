@@ -46,12 +46,25 @@ namespace UsageTracker.Ui
             Height = BarTop + BarH + AxisH + LegendH + S(6);
         }
 
+        /// <summary>배율이 다른 모니터에서 바로 열릴 때도 핸들 생성 시점의 실제 DPI에 맞춘다.</summary>
+        protected override void OnHandleCreated(EventArgs e)
+        {
+            base.OnHandleCreated(e);
+            Rescale();
+        }
+
         /// <summary>배율이 다른 모니터로 옮기면 여백·높이를 다시 정한다.</summary>
         protected override void OnDpiChangedAfterParent(EventArgs e)
         {
             base.OnDpiChangedAfterParent(e);
             Rescale();
             Invalidate();
+        }
+
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing) tip.Dispose();
+            base.Dispose(disposing);
         }
 
         int S(int v) { return (int)Math.Round(v * k); }
@@ -302,11 +315,23 @@ namespace UsageTracker.Ui
             PadR = S(12); PadT = S(26); PadB = S(20);
         }
 
+        protected override void OnHandleCreated(EventArgs e)
+        {
+            base.OnHandleCreated(e);
+            Rescale();
+        }
+
         protected override void OnDpiChangedAfterParent(EventArgs e)
         {
             base.OnDpiChangedAfterParent(e);
             Rescale();
             Invalidate();
+        }
+
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing) tip.Dispose();
+            base.Dispose(disposing);
         }
 
         int S(int v) { return (int)Math.Round(v * k); }

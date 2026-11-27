@@ -132,6 +132,7 @@ namespace UsageTracker.Ui
             recorderAlive = Recorder.RequestFlush();
             var now = DateTime.Now;
             catalog = new AppCatalog(dataDir);
+            excludedIds = new HashSet<string>(new Settings(dataDir).Exclude, StringComparer.OrdinalIgnoreCase);
             List<RawSeg> segs;
             bool readFailed = false;
             try { segs = UsageReader.Read(dataDir, from, to, now, recorderAlive); }

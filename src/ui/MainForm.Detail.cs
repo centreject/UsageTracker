@@ -127,8 +127,7 @@ namespace UsageTracker.Ui
                 var last = UsageReader.LastUsed(dataDir, ids, DateTime.Now, cli ? 'R' : 'A', recorderAlive);
                 AddField(cli ? "마지막 실행" : "마지막 사용", last == null ? "–"
                     : (last.Value >= DateTime.Now.AddMinutes(-1) && recorderAlive ? (cli ? "지금 실행 중" : "지금 사용 중") : last.Value.ToString("yyyy-MM-dd HH:mm")));
-                var excludedNow = new Settings(dataDir).Exclude;
-                if (ids.Count > 0 && ids.TrueForAll(id => excludedNow.Contains(id.ToLowerInvariant())))
+                if (ids.Count > 0 && ids.TrueForAll(id => excludedIds.Contains(id)))
                     AddNote("앞으로 기록하지 않는 앱입니다. 설정 → 기록 제외에서 다시 기록하게 할 수 있습니다.");
                 if (cli) AddNote("터미널 안에서 실행된 프로그램입니다. 사용(활성) 시간은 터미널 창에 쌓이고, 여기에는 실행 시간만 기록됩니다.");
 
@@ -172,15 +171,16 @@ namespace UsageTracker.Ui
         void AddTitle(Image icon, string text)
         {
             var panel = new FlowLayoutPanel { AutoSize = true, WrapContents = false, Margin = new Padding(0, 0, 0, 12) };
-            if (icon != null) panel.Controls.Add(new PictureBox { Image = icon, SizeMode = PictureBoxSizeMode.Zoom, Size = new Size(24, 24), Margin = new Padding(0, 4, 8, 0) });
-            panel.Controls.Add(new Label { Text = text, Font = titleFont, AutoSize = true, ForeColor = theme.Text, MaximumSize = new Size(260, 0) });
+            int icoSz = ScalePx(24);
+            if (icon != null) panel.Controls.Add(new PictureBox { Image = icon, SizeMode = PictureBoxSizeMode.Zoom, Size = new Size(icoSz, icoSz), Margin = new Padding(0, 4, 8, 0) });
+            panel.Controls.Add(new Label { Text = text, Font = titleFont, AutoSize = true, ForeColor = theme.Text, MaximumSize = new Size(ScalePx(260), 0) });
             AddRow(panel, null);
         }
 
         void AddField(string name, string value)
         {
             var l = new Label { Text = name, AutoSize = true, ForeColor = theme.Subtle, Margin = new Padding(0, 3, 12, 3) };
-            var v = new Label { Text = value, AutoSize = true, ForeColor = theme.Text, Margin = new Padding(0, 3, 0, 3), MaximumSize = new Size(200, 0) };
+            var v = new Label { Text = value, AutoSize = true, ForeColor = theme.Text, Margin = new Padding(0, 3, 0, 3), MaximumSize = new Size(ScalePx(200), 0) };
             AddRow(l, v);
         }
 
@@ -191,7 +191,7 @@ namespace UsageTracker.Ui
 
         void AddNote(string text)
         {
-            AddRow(new Label { Text = text, AutoSize = true, ForeColor = theme.Subtle, Margin = new Padding(0, 12, 0, 0), MaximumSize = new Size(280, 0) }, null);
+            AddRow(new Label { Text = text, AutoSize = true, ForeColor = theme.Subtle, Margin = new Padding(0, 12, 0, 0), MaximumSize = new Size(ScalePx(280), 0) }, null);
         }
     }
 }

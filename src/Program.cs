@@ -235,11 +235,20 @@ namespace UsageTracker
         static void UpdateTip()
         {
             string tip = "사용 시간 기록\n" + tracker.StatusText();
-            int min = (int)(tracker.TodayUsedSeconds() / 60);
-            if (min > 0) tip += "\n오늘 사용 " + (min >= 60 ? (min / 60) + "시간 " + (min % 60) + "분" : min + "분");
+            string used = FormatTodayUsed(tracker.TodayUsedSeconds());
+            if (used.Length > 0) tip += "\n오늘 사용 " + used;
             if (tip == lastTip) return;
             lastTip = tip;
             tray.Update(tip);
+        }
+
+        internal static string FormatTodayUsed(double seconds)
+        {
+            int min = (int)(seconds / 60);
+            if (min <= 0) return "";
+            int h = min / 60, m = min % 60;
+            if (h == 0) return m + "분";
+            return m == 0 ? h + "시간" : h + "시간 " + m + "분";
         }
 
         static IntPtr WindowProc(IntPtr h, uint msg, IntPtr wParam, IntPtr lParam)
@@ -362,7 +371,7 @@ namespace UsageTracker
         static void MaybeCheckUpdate()
         {
             if (!manageAutoStart || !settings.UpdateCheck || DateTime.Now < nextUpdateCheck) return;
-            if (tracker.IsIdle || tracker.IsLocked || tracker.ForegroundFullscreen) return;
+            if (tracker.NeedsIdlePoll || tracker.IsLocked || tracker.ForegroundFullscreen) return;
             var due = UpdateState.Load(dataDir).NextCheck;
             if (due > DateTime.Now) { nextUpdateCheck = due; return; }
             nextUpdateCheck = DateTime.Now + UpdateState.RetryAfterFailure;   // 확인 프로세스가 결과를 적으면 그때 다시 읽는다

@@ -39,7 +39,7 @@ namespace UsageTracker.Ui
                 bool first;
                 using (var m = new Mutex(true, "Local\\UsageTracker.Update", out first))
                 {
-                    if (!first) return 0;
+                    if (!first) { if (manual) Activate("업데이트 - 사용 시간 기록"); return 0; }
                     Application.EnableVisualStyles();
                     Application.SetCompatibleTextRenderingDefault(false);
                     return Updater.Run(dataDir, manual, devMode, autoYes && devMode);
