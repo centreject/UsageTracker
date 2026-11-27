@@ -37,6 +37,13 @@ namespace UsageTracker
             set { values["autoStart"] = value ? "1" : "0"; }
         }
 
+        /// <summary>새 버전 알림 (일주일에 한 번 GitHub에서 버전만 확인).</summary>
+        public bool UpdateCheck
+        {
+            get { return GetInt("updateCheck", 1, 0, 1) == 1; }
+            set { values["updateCheck"] = value ? "1" : "0"; }
+        }
+
         /// <summary>기록하지 않을 앱 ID (소문자, 예: game.exe, cli:node.exe). 앞으로만 적용된다.</summary>
         public List<string> Exclude
         {
@@ -77,6 +84,7 @@ namespace UsageTracker
             var sb = new StringBuilder();
             sb.Append("idleMinutes=").Append(IdleMinutes).Append("\r\n");
             sb.Append("autoStart=").Append(AutoStart ? 1 : 0).Append("\r\n");
+            sb.Append("updateCheck=").Append(UpdateCheck ? 1 : 0).Append("\r\n");
             var ex = Exclude;
             if (ex.Count > 0) sb.Append("exclude=").Append(string.Join("|", ex.ToArray())).Append("\r\n");
             AtomicFile.WriteAllText(path, sb.ToString());

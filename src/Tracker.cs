@@ -45,6 +45,8 @@ namespace UsageTracker
         public DateTime PauseUntil { get { return pauseUntil; } }
         public bool IsLocked { get { return locked; } }
         public bool HasActiveApp { get { return fgApp != null; } }
+        /// <summary>지금 맨 앞 창이 전체 화면인지 (게임·영상 중에는 업데이트 안내를 띄우지 않으려고).</summary>
+        public bool ForegroundFullscreen { get { return env.IsFullscreen(env.Foreground()); } }
         /// <summary>자리 비움 판정을 짧게 다시 봐야 하는 상태 (자리 비움, 또는 다른 모니터 시청 중).</summary>
         public bool NeedsIdlePoll { get { return idle || watchApp != null; } }
 

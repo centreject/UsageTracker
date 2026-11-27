@@ -123,6 +123,19 @@ namespace UsageTracker
 
                 Safe("start", tracker.Start);
                 Safe("today", () => tracker.SeedTodayUsed(DateTime.Today, SessionWriter.TodayUsedSeconds(dataDir, DateTime.Now)));
+                if (manageAutoStart)
+                {
+                    // 업데이트 확인: 켠 뒤 10분은 기다리고, 그 뒤 마지막 확인에서 일주일이 지났으면
+                    var due = UpdateState.Load(dataDir).NextCheck;
+                    var earliest = DateTime.Now.AddMinutes(10);
+                    nextUpdateCheck = due > earliest ? due : earliest;
+                }
+                Safe("update-cleanup", () =>
+                {
+                    // 업데이트 때 이름만 바꿔 둔 옛 실행 파일 정리
+                    foreach (var f in Directory.GetFiles(Path.GetDirectoryName(exePath), "UsageTracker.exe*.old"))
+                        try { File.Delete(f); } catch { }
+                });
                 UpdateTip();
                 Native.SetTimer(hwnd, TimerTickId, tickMs, IntPtr.Zero);
                 Native.SetTimer(hwnd, TimerFlushId, flushMs, IntPtr.Zero);
@@ -293,6 +306,7 @@ namespace UsageTracker
                 tracker.Tick();
                 UpdateIdleTimer();
                 UpdateTip();   // 오늘 사용 시간 (분 단위라 1분에 한 번이면 충분)
+                Safe("update", MaybeCheckUpdate);
                 Native.TrimMemory();
             }
             else if (id == TimerIdleId)
@@ -318,6 +332,22 @@ namespace UsageTracker
                 Native.KillTimer(hwnd, TimerUwpRetryId);
                 if (!tracker.HasActiveApp) tracker.OnForeground(Native.GetForegroundWindow());
             }
+        }
+
+        static DateTime nextUpdateCheck = DateTime.MaxValue;
+
+        /// <summary>
+        /// 일주일에 한 번 업데이트 확인 프로세스를 띄운다. 기록 모드 자신은 네트워크를 쓰지 않는다.
+        /// 켠 직후(10분)·자리 비움·잠금·전체 화면(게임·영상) 중에는 미룬다.
+        /// </summary>
+        static void MaybeCheckUpdate()
+        {
+            if (!manageAutoStart || !settings.UpdateCheck || DateTime.Now < nextUpdateCheck) return;
+            if (tracker.IsIdle || tracker.IsLocked || tracker.ForegroundFullscreen) return;
+            var due = UpdateState.Load(dataDir).NextCheck;
+            if (due > DateTime.Now) { nextUpdateCheck = due; return; }
+            nextUpdateCheck = DateTime.Now + UpdateState.RetryAfterFailure;   // 확인 프로세스가 결과를 적으면 그때 다시 읽는다
+            LaunchUi(" --update-check");
         }
 
         static void UpdateIdleTimer()

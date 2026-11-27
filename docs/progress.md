@@ -42,6 +42,12 @@
 5. ~~정리~~ → 2026-11-27 옛 가상 사본 삭제(실제 폴더 쪽이 더 큼을 확인한 뒤), fix/code-review 브랜치 삭제
 
 화면 조작 시험 방법(재시험 때): 설치본 exe + `--data=<저장소>\testdata-demo`, 시험 창은 화면 왼쪽(Claude 창이 오른쪽을 덮음), 트레이 메뉴 "종료"·설정 변경 금지.
+## 릴리스 절차 (자동 업데이트 때문에 바뀜, 2026-11-27)
+
+- VERSION·CHANGELOG 갱신 → `.\tools\package.ps1` → 커밋·주석 태그·push → `gh release create v<ver> dist\UsageTracker-v<ver>.zip dist\UsageTracker-v<ver>.zip.sha256 --prerelease ...` (1.0.0부터는 --prerelease 빼기: 1.0 이후 앱은 정식 릴리스만 알림)
+- **.sha256 파일이 없으면 앱이 자동 업데이트하지 않고 릴리스 페이지만 연다**
+- 업데이트 확인 상태: 데이터 폴더 update.ini (lastCheck, skip). 시험: `--ui --update-check --manual --yes --data=<시험 폴더>` (--yes는 시험 폴더에서만 팝업 없이 진행)
+
 ## 작업 규칙·주의 (지금까지 겪은 것)
 
 - PowerShell 5.1: 한글이 든 .ps1은 UTF-8 **BOM**으로 저장. 커밋 메시지는 BOM 없이 파일로 써서 `git commit -F`

@@ -91,6 +91,7 @@ namespace UsageTracker
                 { "T38 기록 제외 앱", T38_Exclude },
                 { "T39 보조 모니터 시청", T39_WatchOtherMonitor },
                 { "T40 오늘 사용 시간 (트레이 툴팁)", T40_TodayUsed },
+                { "T41 업데이트 알림 판단", T41_UpdateDecision },
             };
             foreach (var kv in tests)
             {
@@ -749,6 +750,37 @@ namespace UsageTracker
             var t2 = new Tracker(env, new SessionWriter(dir));
             t2.SeedTodayUsed(env.Now(), SessionWriter.TodayUsedSeconds(dir, env.Now()));
             Near("다시 시작해도 이어짐", 60, t2.TodayUsedSeconds());
+        }
+
+        static void T41_UpdateDecision()
+        {
+            Func<string, Version> V = s => new Version(s);
+            True("새 버전이면 알림", UpdateState.ShouldNotify(V("0.8.5"), V("0.9.0"), "", false));
+            True("같은 버전이면 알림 없음", !UpdateState.ShouldNotify(V("0.9.0"), V("0.9.0"), "", false));
+            True("다시 알리지 않기로 고른 버전은 알림 없음", !UpdateState.ShouldNotify(V("0.8.5"), V("0.9.0"), "0.9.0", false));
+            True("다시 알리지 않기 뒤 더 새 버전(0.9.1)은 알림", UpdateState.ShouldNotify(V("0.8.5"), V("0.9.1"), "0.9.0", false));
+            True("직접 확인은 건너뛴 버전도 보여 줌", UpdateState.ShouldNotify(V("0.8.5"), V("0.9.0"), "0.9.0", true));
+            True("태그 v0.9.1 읽기", UpdateState.ParseTag("v0.9.1") == V("0.9.1"));
+            True("태그 1.0.0-rc1 읽기", UpdateState.ParseTag("1.0.0-rc1") == V("1.0.0"));
+            True("이상한 태그는 무시", UpdateState.ParseTag("latest") == null);
+
+            string json = "[" +
+                "{\"tag_name\":\"v1.1.0\",\"draft\":true,\"prerelease\":false,\"assets\":[]}," +
+                "{\"tag_name\":\"v1.0.1-beta\",\"draft\":false,\"prerelease\":true,\"assets\":[]}," +
+                "{\"tag_name\":\"v1.0.0\",\"draft\":false,\"prerelease\":false,\"body\":\"첫 정식\",\"assets\":[" +
+                    "{\"name\":\"UsageTracker-v1.0.0.zip\",\"browser_download_url\":\"https://x/z.zip\"}," +
+                    "{\"name\":\"UsageTracker-v1.0.0.zip.sha256\",\"browser_download_url\":\"https://x/z.zip.sha256\"}]}," +
+                "{\"tag_name\":\"v0.9.0\",\"draft\":false,\"prerelease\":true,\"assets\":[]}]";
+            True("1.0 전: 초안은 빼고 가장 높은 버전(사전 릴리스 포함)", Ui.Updater.PickVersionForTest(json, "0.8.5") == "1.0.1");
+            True("1.0부터: 정식 릴리스만, 업데이트 파일 확인", Ui.Updater.PickVersionForTest(json, "1.0.0") == "1.0.0+files");
+
+            var dir = NewDir();
+            var st = UpdateState.Load(dir);
+            True("처음엔 바로 확인 대상", st.NextCheck == DateTime.MinValue);
+            st.LastCheck = new DateTime(2026, 11, 27, 10, 0, 0); st.SkipVersion = "0.9.0"; st.Save();
+            var st2 = UpdateState.Load(dir);
+            True("다음 확인은 일주일 뒤", st2.NextCheck == new DateTime(2026, 12, 4, 10, 0, 0));
+            True("건너뛴 버전 저장", st2.SkipVersion == "0.9.0");
         }
 
         static void T31_IdleAfterAudio()

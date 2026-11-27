@@ -66,6 +66,7 @@ namespace UsageTracker.Ui
         readonly NumericUpDown idle = new NumericUpDown { Minimum = 1, Maximum = 120, Width = 70 };
         readonly CheckBox autoStart = new CheckBox { Text = "Windows 시작 시 실행", AutoSize = true };
         bool autoStartInitially;
+        readonly CheckBox updateCheck = new CheckBox { Text = "새 버전 알림 (일주일에 한 번 확인)", AutoSize = true };
         List<string> excluded = new List<string>();
         readonly ListBox excludeList = new ListBox { SelectionMode = SelectionMode.MultiExtended, BorderStyle = BorderStyle.FixedSingle, IntegralHeight = false };
 
@@ -119,6 +120,24 @@ namespace UsageTracker.Ui
             else if (winOff && settings.AutoStart)
                 root.Controls.Add(Note("Windows 설정 → 앱 → 시작 앱에서 꺼 둔 상태예요. 여기서 켜고 저장하면 다시 켜져요."));
 
+            root.Controls.Add(Header("업데이트", bold));
+            updateCheck.Checked = settings.UpdateCheck;
+            root.Controls.Add(updateCheck);
+            var checkNow = new Button { Text = "지금 확인", AutoSize = true, Margin = new Padding(0, 4, 0, 0) };
+            checkNow.Click += (s, e) =>
+            {
+                try
+                {
+                    Process.Start(Application.ExecutablePath, "--ui --update-check --manual" + (devMode ? " \"--data=" + dataDir + "\"" : ""));
+                }
+                catch (Exception ex) { MessageBox.Show(this, "업데이트 확인을 시작하지 못했어요: " + ex.Message, "업데이트"); }
+            };
+            root.Controls.Add(checkNow);
+            var st = UpdateState.Load(dataDir);
+            root.Controls.Add(Note("지금 v" + Updater.CurrentVersion().ToString(3)
+                + (st.LastCheck == DateTime.MinValue ? "" : " · 마지막 확인 " + st.LastCheck.ToString("yyyy-MM-dd"))
+                + ". 확인할 때 GitHub에서 버전 정보만 받아요. 새 버전이 있으면 설치할지 물어봐요."));
+
             // 기록 제외: 목록에서 고른 앱을 다시 기록하게 할 수 있다 (저장할 때 적용)
             root.Controls.Add(Header("기록 제외", bold));
             excluded = settings.Exclude;
@@ -149,7 +168,7 @@ namespace UsageTracker.Ui
             var folder = new LinkLabel { Text = dataDir, AutoSize = true, MaximumSize = new Size(420, 0), Margin = new Padding(0, 0, 0, 4) };
             folder.LinkClicked += (s, e) => { try { Process.Start("explorer.exe", "\"" + dataDir + "\""); } catch { } };
             root.Controls.Add(folder);
-            root.Controls.Add(Note("기록은 이 PC에만 저장되고, 네트워크로 보내지 않아요. 창 제목은 저장하지 않아요."));
+            root.Controls.Add(Note("기록은 이 PC에만 저장되고, 네트워크로 보내지 않아요. 창 제목은 저장하지 않아요. (업데이트 확인 때만 GitHub에서 버전 정보를 받아요.)"));
 
             var reset = new Button { Text = "전체 기록 초기화...", AutoSize = true, Tag = "danger", Margin = new Padding(0, 8, 0, 0) };
             reset.Click += (s, e) => ResetAll();
@@ -189,6 +208,7 @@ namespace UsageTracker.Ui
         {
             settings.IdleMinutes = (int)idle.Value;
             if (!devMode) settings.AutoStart = autoStart.Checked;
+            settings.UpdateCheck = updateCheck.Checked;
             if (excluded.Count > 0)
             {
                 // 다른 창에서 그사이 더한 제외 앱은 지우지 않도록, 이 창에서 뺀 것만 빼서 저장

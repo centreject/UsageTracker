@@ -17,7 +17,7 @@ namespace UsageTracker.Ui
         {
             Recorder.DataDir = dataDir;
             int view = 0; string select = null;
-            bool settingsOnly = false, devMode = false, favOnly = false;
+            bool settingsOnly = false, devMode = false, favOnly = false, updateCheck = false, manual = false, autoYes = false;
             string search = null;
             foreach (var a in args)
             {
@@ -28,6 +28,22 @@ namespace UsageTracker.Ui
                 else if (a.StartsWith("--search=")) search = a.Substring(9);
                 else if (a.StartsWith("--theme=")) Theme.Forced = a.Substring(8);
                 else if (a.StartsWith("--data=")) devMode = true;
+                else if (a == "--update-check") updateCheck = true;
+                else if (a == "--manual") manual = true;
+                else if (a == "--yes") autoYes = true;   // 시험용: 팝업 없이 바로 업데이트 (시험 폴더 --data=와 함께일 때만)
+            }
+
+            if (updateCheck)
+            {
+                // 일주일에 한 번 기록 모드가 띄우거나(자동), 설정의 "지금 확인"(manual)으로 띄운다. 끝나면 바로 종료.
+                bool first;
+                using (var m = new Mutex(true, "Local\\UsageTracker.Update", out first))
+                {
+                    if (!first) return 0;
+                    Application.EnableVisualStyles();
+                    Application.SetCompatibleTextRenderingDefault(false);
+                    return Updater.Run(dataDir, manual, devMode, autoYes && devMode);
+                }
             }
 
             if (settingsOnly)
